@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import zipfile
 
-# --- Custom CSS for your All Seeing Eye background ---
+# --- All Seeing Eye background CSS ---
 st.markdown(f"""
     <style>
     .stApp {{
@@ -36,13 +36,10 @@ st.markdown("---")
 
 # --- Sidebar with dropdowns ---
 st.sidebar.header("Elite Controls")
-menu = st.sidebar.selectbox(
+section = st.sidebar.selectbox(
     "Choose Analysis Section",
     ["Overview", "Player Stats", "Advanced Analytics"]
 )
-
-# Example: Dropdown for player selection (will populate after file upload)
-selected_player = st.sidebar.selectbox("Select Player (after upload)", ["No data loaded"])
 
 # --- File uploader ---
 uploaded_files = st.file_uploader(
@@ -54,7 +51,6 @@ uploaded_files = st.file_uploader(
 
 # --- Helper functions ---
 def display_omniscience_analytics(df):
-    # Tabs for different analytics
     tab1, tab2, tab3 = st.tabs(["Quick Stats", "Unique Players", "Bat Speed Chart"])
     with tab1:
         st.write("**Quick Stats:**")
@@ -69,21 +65,21 @@ def display_omniscience_analytics(df):
             df["avg_bat_speed"] = pd.to_numeric(df["avg_bat_speed"], errors="coerce")
             st.bar_chart(df.groupby("name")["avg_bat_speed"].mean())
 
-def load_and_display_csv(file_obj, file_name):
+def load_and_display_csv(file_obj, file_name, player_filter=None):
     try:
         df = pd.read_csv(file_obj)
         st.success(f"Loaded: {file_name}")
+        if player_filter and "name" in df.columns:
+            df = df[df["name"] == player_filter]
+            st.info(f"Filtered for player: {player_filter}")
         st.dataframe(df, use_container_width=True)
-        # Update player dropdown in sidebar
-        if "name" in df.columns:
-            st.session_state['players'] = sorted(df["name"].unique())
         display_omniscience_analytics(df)
         return df
     except Exception as e:
         st.error(f"Could not read {file_name}: {e}")
         return None
 
-def handle_zip(uploaded_file):
+def handle_zip(uploaded_file, player_filter=None):
     dfs = []
     try:
         with zipfile.ZipFile(uploaded_file) as z:
@@ -92,7 +88,7 @@ def handle_zip(uploaded_file):
                 st.warning("No CSV files found in ZIP.")
             for file_name in csv_files:
                 with z.open(file_name) as f:
-                    df = load_and_display_csv(f, file_name)
+                    df = load_and_display_csv(f, file_name, player_filter)
                     if df is not None:
                         dfs.append(df)
     except Exception as e:
@@ -101,30 +97,42 @@ def handle_zip(uploaded_file):
 
 # --- Main logic ---
 all_dfs = []
+all_players = set()
 if uploaded_files:
-    st.session_state['players'] = []
     for uploaded_file in uploaded_files:
         if uploaded_file.name.endswith('.csv'):
-            df = load_and_display_csv(uploaded_file, uploaded_file.name)
-            if df is not None:
-                all_dfs.append(df)
+            df = pd.read_csv(uploaded_file)
+            all_dfs.append(df)
+            if "name" in df.columns:
+                all_players.update(df["name"].unique())
         elif uploaded_file.name.endswith('.zip'):
-            dfs = handle_zip(uploaded_file)
-            all_dfs.extend(dfs)
+            try:
+                with zipfile.ZipFile(uploaded_file) as z:
+                    csv_files = [f for f in z.namelist() if f.endswith('.csv')]
+                    for file_name in csv_files:
+                        with z.open(file_name) as f:
+                            df = pd.read_csv(f)
+                            all_dfs.append(df)
+                            if "name" in df.columns:
+                                all_players.update(df["name"].unique())
+            except Exception as e:
+                st.error(f"Could not process ZIP file: {e}")
         else:
             st.warning(f"Unsupported file type: {uploaded_file.name}")
-    # Update player dropdown after loading files
-    if all_dfs and 'players' in st.session_state and st.session_state['players']:
-        selected_player = st.sidebar.selectbox("Select Player", st.session_state['players'])
-        # Show stats for selected player in a tab
-        if selected_player != "No data loaded":
-            st.markdown("---")
-            st.subheader(f"Stats for {selected_player}")
-            for df in all_dfs:
-                if "name" in df.columns and selected_player in df["name"].values:
-                    st.dataframe(df[df["name"] == selected_player])
+
+    # Player dropdown after data is loaded
+    player_list = sorted(list(all_players)) if all_players else ["All"]
+    player_choice = st.sidebar.selectbox("Select Player", ["All"] + player_list)
+
+    # Tabs and analytics
+    for idx, df in enumerate(all_dfs):
+        st.markdown(f"### Data File {idx+1}")
+        if player_choice != "All" and "name" in df.columns:
+            df = df[df["name"] == player_choice]
+            st.info(f"Filtered for player: {player_choice}")
+        display_omniscience_analytics(df)
 else:
-    st.info("Please upload at least one CSV or ZIP file to view the dashboard.")
+    st.info("Please upload at least one CSV or ZIP file to view and interact with the dashboard.")
 
 st.markdown("---")
 st.markdown(
