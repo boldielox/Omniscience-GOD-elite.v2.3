@@ -1,27 +1,29 @@
 import streamlit as st
 import pandas as pd
 import zipfile
-import io
 
-# --- Custom CSS for the All Seeing Eye backdrop and premium styling ---
-st.markdown("""
+# --- All Seeing Eye background CSS ---
+st.markdown(f"""
     <style>
-    .stApp {
-        background-image: url('https://images.unsplash.com/photo-1506744038136-46273834b3fb?fit=crop&w=1200&q=80'); /* Replace with your All Seeing Eye image URL if needed */
+    .stApp {{
+        background-image: url('https://pplx-res.cloudinary.com/image/upload/v1748978611/user_uploads/71937249/fb5461f1-3a0f-4d40-b7ae-b45da0418088/101.jpg');
         background-size: cover;
         background-attachment: fixed;
         background-repeat: no-repeat;
-    }
-    .main {
+    }}
+    .main {{
         background: rgba(10,10,20,0.85);
         border-radius: 18px;
         padding: 2rem;
-    }
-    h1, h2, h3, h4, h5, h6 {
+    }}
+    h1, h2, h3, h4, h5, h6 {{
         color: #00ffe7 !important;
         text-shadow: 0 0 10px #0ff;
         font-family: 'Segoe UI', 'Arial', sans-serif;
-    }
+    }}
+    .css-1d391kg, .css-10trblm, .css-1v0mbdj {{
+        color: #e0e0e0 !important;
+    }}
     </style>
 """, unsafe_allow_html=True)
 
@@ -30,7 +32,6 @@ st.markdown(
     "<h3 style='text-align:center;color:#ff00c8;'>The All Seeing Eye</h3>",
     unsafe_allow_html=True
 )
-
 st.markdown("---")
 
 uploaded_files = st.file_uploader(
@@ -40,19 +41,28 @@ uploaded_files = st.file_uploader(
     help="Elite data only! ZIPs can contain multiple CSVs."
 )
 
+def display_omniscience_analytics(df):
+    st.subheader("Omniscience (GM) v2.3: Core Analytics")
+    # Quick Stats
+    st.write("**Quick Stats:**")
+    st.write(df.describe())
+    # Unique Player Names (if column exists)
+    if "name" in df.columns:
+        st.write("**Unique Player Names:**")
+        st.write(df["name"].unique())
+    # Average Bat Speed per Player (if columns exist)
+    if "avg_bat_speed" in df.columns and "name" in df.columns:
+        st.write("**Average Bat Speed per Player:**")
+        df["avg_bat_speed"] = pd.to_numeric(df["avg_bat_speed"], errors="coerce")
+        st.bar_chart(df.groupby("name")["avg_bat_speed"].mean())
+    # Add more analytics as needed here!
+
 def load_and_display_csv(file_obj, file_name):
     try:
         df = pd.read_csv(file_obj)
         st.success(f"Loaded: {file_name}")
         st.dataframe(df, use_container_width=True)
-        st.write("**Quick Stats:**")
-        st.write(df.describe())
-        # Example: Custom analytics
-        if "avg_bat_speed" in df.columns and "name" in df.columns:
-            st.header("Average Bat Speed per Player")
-            df["avg_bat_speed"] = pd.to_numeric(df["avg_bat_speed"], errors="coerce")
-            st.bar_chart(df.set_index("name")["avg_bat_speed"])
-        # Add your custom Omniscience analytics here!
+        display_omniscience_analytics(df)
     except Exception as e:
         st.error(f"Could not read {file_name}: {e}")
 
