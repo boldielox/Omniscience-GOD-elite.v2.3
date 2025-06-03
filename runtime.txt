@@ -1,0 +1,7 @@
+diff --git a/runtime.txt b/runtime.txt
+new file mode 100644
+index 0000000..c7e3b20
+--- /dev/null
++++ b/runtime.txt
+@@ -0,0 +1 @@
++python-3.10.13
