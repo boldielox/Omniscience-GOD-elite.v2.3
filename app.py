@@ -1,200 +1,318 @@
 import streamlit as st
-import pandas as pd
 import requests
 from datetime import datetime, timedelta
 import pytz
 import threading
 import time
-import zipfile
 
-# --- Config ---
-LEAGUES = ["MLB", "NBA", "WNBA", "NHL", "NCAA Baseball"]
-MAX_GAMES = 50
-API_INTERVAL = 1800  # 30 minutes
-SPORTSBOOKS = ["FanDuel", "DraftKings", "BetMGM", "Caesars"]
+# ======================
+# CONFIGURATION
+# ======================
+class Config:
+    # API Settings
+    API_URL = "https://api.the-odds-api.com/v4"
+    API_KEY = st.secrets.get("ODDS_API_KEY", "demo")  # Use GitHub Secrets in production
+    
+    # App Settings
+    REFRESH_INTERVAL = 1800  # 30 minutes
+    MAX_GAMES = 50
+    TIMEZONE = pytz.timezone('US/Eastern')
+    
+    # Sports Configuration
+    SPORTS = {
+        "MLB": "baseball_mlb",
+        "NBA": "basketball_nba",
+        "NFL": "americanfootball_nfl",
+        "NHL": "icehockey_nhl",
+        "Tennis": "tennis_atp"
+    }
+    
+    SPORTSBOOKS = ["FanDuel", "DraftKings", "BetMGM", "Caesars", "PointsBet"]
+    MARKETS = ["h2h", "totals", "spreads"]
 
-# --- API Keys (use secrets in production) ---
-API_KEY = st.secrets.get("ODDS_API_KEY", "demo")
-
-# --- Cosmic UI ---
-st.set_page_config(layout="wide", page_title="Omniscience Elite v3.0", page_icon="👁️")
-st.markdown("""
-<style>
-.stApp {background-image: url('https://pplx-res.cloudinary.com/image/upload/v1748978611/user_uploads/71937249/fb5461f1-3a0f-4d40-b7ae-b45da0418088/101.jpg');}
-.main {background: rgba(10,10,20,0.92) !important;}
-.stSidebar {background: rgba(5,5,15,0.97) !important;}
-.st-b7 {background-color: rgba(0,20,40,0.85) !important;}
-.stAlert {border-left: 4px solid #00ffe7 !important;}
-</style>
-""", unsafe_allow_html=True)
-
-# --- Data Models ---
+# ======================
+# DATA MODELS
+# ======================
 class Game:
     def __init__(self, data):
         self.id = data['id']
-        self.league = data['sport_key']
+        self.sport_key = data['sport_key']
         self.home = data['home_team']
         self.away = data['away_team']
-        self.start_time = datetime.fromisoformat(data['commence_time'][:-1]).astimezone(pytz.utc)
+        self.start_time = self._parse_time(data['commence_time'])
         self.odds = self._parse_odds(data['bookmakers'])
-
+    
+    def _parse_time(self, time_str):
+        dt = datetime.fromisoformat(time_str[:-1]).astimezone(pytz.utc)
+        return dt.astimezone(Config.TIMEZONE)
+    
     def _parse_odds(self, bookmakers):
-        return {
-            book['key']: {
-                'moneyline': next((m for m in book['markets'] if m['key'] == 'h2h'), None),
-                'totals': next((m for m in book['markets'] if m['key'] == 'totals'), None),
-                'vig': book.get('vig', 0)
-            }
-            for book in bookmakers if book['key'] in SPORTSBOOKS
-        }
+        odds_data = {}
+        for book in bookmakers:
+            if book['key'] in Config.SPORTSBOOKS:
+                odds_data[book['key']] = {
+                    'moneyline': next((m for m in book['markets'] if m['key'] == 'h2h'), None),
+                    'totals': next((m for m in book['markets'] if m['key'] == 'totals'), None),
+                    'spreads': next((m for m in book['markets'] if m['key'] == 'spreads'), None)
+                }
+        return odds_data
 
-# --- API Service ---
+# ======================
+# API SERVICE
+# ======================
 class OddsAPI:
     @staticmethod
-    def fetch_games(league):
+    def verify_key():
+        """Verify API key validity"""
         try:
-            url = f"https://api.the-odds-api.com/v4/sports/{league}/odds"
+            url = f"{Config.API_URL}/sports"
+            response = requests.get(url, params={'apiKey': Config.API_KEY})
+            
+            if response.status_code == 200:
+                remaining = response.headers.get('x-requests-remaining', 'Unknown')
+                st.success(f"✅ API Key Valid (Remaining requests: {remaining})")
+                return True
+            elif response.status_code == 401:
+                st.error("❌ Invalid API Key - Check your GitHub Secrets")
+                return False
+            else:
+                st.warning(f"⚠️ API Response: {response.status_code} - {response.text}")
+                return False
+        except Exception as e:
+            st.error(f"🚨 Connection Error: {str(e)}")
+            return False
+    
+    @staticmethod
+    def fetch_games(sport_key):
+        """Fetch live odds for a specific sport"""
+        try:
+            url = f"{Config.API_URL}/sports/{sport_key}/odds"
             params = {
-                'apiKey': API_KEY,
+                'apiKey': Config.API_KEY,
                 'regions': 'us',
-                'markets': 'h2h,totals',
+                'markets': ','.join(Config.MARKETS),
                 'oddsFormat': 'american',
                 'dateFormat': 'iso'
             }
+            
             response = requests.get(url, params=params)
-            return [Game(game) for game in response.json()[:MAX_GAMES]] if response.ok else []
+            
+            if response.ok:
+                games = response.json()
+                if not games:
+                    st.warning(f"No current games for {sport_key}")
+                return [Game(game) for game in games[:Config.MAX_GAMES]]
+            
+            st.error(f"API Error: {response.status_code} - {response.text}")
+            return []
+            
         except Exception as e:
-            st.error(f"API Error: {str(e)}")
+            st.error(f"API Connection Failed: {str(e)}")
             return []
 
-# --- Data Refresh System ---
-def start_background_refresh():
-    def refresh_loop():
-        while True:
-            st.session_state.last_refresh = datetime.now()
-            for league in LEAGUES:
-                st.session_state.games[league] = OddsAPI.fetch_games(league.lower())
-            time.sleep(API_INTERVAL)
+# ======================
+# CORE APP FUNCTIONALITY
+# ======================
+class OddsApp:
+    def __init__(self):
+        self._setup_ui()
+        self._init_session()
+        self._verify_api()
     
-    if 'refresh_thread' not in st.session_state:
-        st.session_state.refresh_thread = threading.Thread(target=refresh_loop, daemon=True)
-        st.session_state.refresh_thread.start()
-
-# --- Initialize Session ---
-if 'games' not in st.session_state:
-    st.session_state.games = {league: [] for league in LEAGUES}
-    start_background_refresh()
-
-# --- Header ---
-st.markdown("""
-<div style="text-align:center">
-<h1 style="color:#00ffe7;text-shadow:0 0 10px #0ff">Omniscience Elite v3.0</h1>
-<h3 style="color:#ff00c8">The All-Seeing Odds Oracle</h3>
-</div>
-""", unsafe_allow_html=True)
-st.markdown("---")
-
-# --- Sidebar Controls ---
-with st.sidebar:
-    st.header("⚙️ Oracle Controls")
-    selected_leagues = st.multiselect(
-        "🏆 Select Leagues", 
-        LEAGUES, 
-        default=["MLB", "NBA"],
-        key="league_select"
-    )
-    
-    st.markdown("### 📊 Display Options")
-    show_vig = st.toggle("Show Vig", True, key="vig_toggle")
-    show_totals = st.toggle("Show Totals", True, key="totals_toggle")
-    
-    if 'last_refresh' in st.session_state:
-        st.markdown(f"🔄 Last Refresh: {st.session_state.last_refresh.strftime('%H:%M:%S UTC')}")
-    st.button("Force Refresh", on_click=lambda: start_background_refresh())
-
-# --- Main Tabs ---
-tab1, tab2 = st.tabs(["🎲 Live Odds", "📈 Advanced Analytics"])
-
-# --- Tab 1: Live Odds ---
-with tab1:
-    for league in selected_leagues:
-        st.subheader(f"🏟️ {league} Games")
+    def _setup_ui(self):
+        """Configure Streamlit UI settings"""
+        st.set_page_config(
+            layout="wide",
+            page_title="Odds Tracker Pro",
+            page_icon="📊",
+            initial_sidebar_state="expanded"
+        )
         
-        if not st.session_state.games[league]:
-            st.warning(f"No {league} games found")
-            continue
+        self._apply_custom_styles()
+    
+    def _apply_custom_styles(self):
+        """Add custom CSS styling"""
+        st.markdown("""
+        <style>
+        [data-testid="stAppViewContainer"] {
+            background: linear-gradient(rgba(10,10,30,0.95), rgba(5,5,20,0.95)), 
+                        url('https://images.unsplash.com/photo-1631635589499-afd87d52b244');
+            background-size: cover;
+            background-attachment: fixed;
+        }
+        .game-card {
+            border-radius: 10px;
+            padding: 15px;
+            margin: 10px 0;
+            background: rgba(0,15,30,0.85);
+            border-left: 4px solid #00ffe7;
+        }
+        .odds-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .odds-table th {
+            background: rgba(0,50,100,0.7);
+            padding: 8px;
+            text-align: center;
+        }
+        .odds-table td {
+            padding: 6px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        </style>
+        """, unsafe_allow_html=True)
+    
+    def _init_session(self):
+        """Initialize session state variables"""
+        if 'games' not in st.session_state:
+            st.session_state.games = {sport: [] for sport in Config.SPORTS.keys()}
+            self._start_background_refresh()
+    
+    def _verify_api(self):
+        """Verify API key and show status"""
+        if Config.API_KEY == "demo":
+            st.warning("⚠️ Using DEMO MODE - Limited data only")
+        elif 'api_verified' not in st.session_state:
+            if OddsAPI.verify_key():
+                st.session_state.api_verified = True
+    
+    def _start_background_refresh(self):
+        """Start background data refresh thread"""
+        def refresh_loop():
+            while True:
+                try:
+                    for sport_name, sport_key in Config.SPORTS.items():
+                        st.session_state.games[sport_name] = OddsAPI.fetch_games(sport_key)
+                    st.session_state.last_refresh = datetime.now()
+                except Exception as e:
+                    st.error(f"Refresh error: {str(e)}")
+                time.sleep(Config.REFRESH_INTERVAL)
+        
+        if 'refresh_thread' not in st.session_state:
+            thread = threading.Thread(target=refresh_loop, daemon=True)
+            thread.start()
+            st.session_state.refresh_thread = thread
+    
+    def _render_sidebar(self):
+        """Render the control sidebar"""
+        with st.sidebar:
+            st.title("⚙️ Controls")
+            st.markdown("---")
             
-        for game in st.session_state.games[league]:
-            with st.expander(f"{game.away} @ {game.home}", expanded=True):
-                cols = st.columns(3)
-                
-                # Game Info
-                cols[0].markdown(f"""
-                **⏰ Start Time**  
-                {game.start_time.strftime('%m/%d %I:%M %p ET')}  
-                **📊 League**  
-                {league}
-                """)
-                
-                # Moneyline Odds
-                odds_col = cols[1].container()
-                odds_col.markdown("**💰 Moneyline**")
-                for book in SPORTSBOOKS:
-                    if book in game.odds and game.odds[book]['moneyline']:
-                        ml = game.odds[book]['moneyline']
-                        away_odds = next(o['price'] for o in ml['outcomes'] if o['name'] == game.away)
-                        home_odds = next(o['price'] for o in ml['outcomes'] if o['name'] == game.home)
-                        
-                        odds_col.markdown(f"""
-                        **{book}**  
-                        {game.away}: {away_odds}  
-                        {game.home}: {home_odds}  
-                        {f"Vig: {game.odds[book]['vig']}%" if show_vig else ""}
-                        """)
-                
-                # Totals
-                if show_totals:
-                    totals_col = cols[2].container()
-                    totals_col.markdown("**🔢 Totals**")
-                    for book in SPORTSBOOKS:
-                        if book in game.odds and game.odds[book]['totals']:
-                            total = game.odds[book]['totals']
-                            over = next(o for o in total['outcomes'] if o['name'] == 'Over')
-                            under = next(o for o in total['outcomes'] if o['name'] == 'Under')
-                            
-                            totals_col.markdown(f"""
-                            **{book}**  
-                            O {over['point']}: {over['price']}  
-                            U {under['point']}: {under['price']}  
-                            {f"Vig: {game.odds[book]['vig']}%" if show_vig else ""}
-                            """)
-
-# --- Tab 2: Analytics ---
-with tab2:
-    st.subheader("🔮 Predictive Models")
-    selected_model = st.selectbox(
-        "Select Model", 
-        ["Bat Speed Predictor", "Vig-Adjusted CLV", "Prop Value Finder"],
-        key="model_select"
-    )
+            # League selection
+            selected_sports = st.multiselect(
+                "SELECT LEAGUES",
+                list(Config.SPORTS.keys()),
+                default=["NBA", "NFL"],
+                key="league_select"
+            )
+            
+            # Display options
+            st.markdown("### 📊 Display Options")
+            show_markets = st.multiselect(
+                "MARKETS TO SHOW",
+                Config.MARKETS,
+                default=Config.MARKETS,
+                key="markets_select"
+            )
+            
+            # Refresh info
+            if 'last_refresh' in st.session_state:
+                st.markdown(f"🔄 Last refresh: {st.session_state.last_refresh.strftime('%H:%M:%S')}")
+            st.button("🔄 Manual Refresh", on_click=self._force_refresh)
+            
+            # API status
+            st.markdown("---")
+            st.markdown("### 🔌 API Status")
+            if Config.API_KEY == "demo":
+                st.error("DEMO MODE ACTIVE")
+            else:
+                st.success("LIVE DATA CONNECTED")
     
-    if selected_model == "Bat Speed Predictor":
-        st.markdown("### 🏏 Bat Speed Oscillator")
-        # [Your existing bat speed analytics here]
+    def _force_refresh(self):
+        """Force immediate data refresh"""
+        st.session_state.last_refresh = datetime.now()
+        for sport_name, sport_key in Config.SPORTS.items():
+            st.session_state.games[sport_name] = OddsAPI.fetch_games(sport_key)
+        st.rerun()
+    
+    def _render_game_card(self, game, show_markets):
+        """Render an individual game card"""
+        with st.container():
+            st.markdown(f"""
+            <div class="game-card">
+                <h3>{game.away} @ {game.home}</h3>
+                <p>⏰ {game.start_time.strftime('%a %m/%d %I:%M %p ET')}</p>
+            """, unsafe_allow_html=True)
+            
+            # Create odds tables for each sportsbook
+            for book in Config.SPORTSBOOKS:
+                if book in game.odds:
+                    self._render_odds_table(book, game.odds[book], show_markets)
+            
+            st.markdown("</div>", unsafe_allow_html=True)
+    
+    def _render_odds_table(self, book_name, odds_data, show_markets):
+        """Render odds table for a specific sportsbook"""
+        st.markdown(f"**{book_name}**")
         
-    elif selected_model == "Vig-Adjusted CLV":
-        st.markdown("### 💰 Closing Line Value Calculator")
-        # Add vig-adjusted CLV calculations
+        # Prepare table data
+        headers = ["Market"] + [game.away, game.home] if 'h2h' in show_markets else ["Market", "Line", "Odds"]
+        rows = []
         
-    elif selected_model == "Prop Value Finder":
-        st.markdown("### 🔍 Prop Bet Value Scanner")
-        # Add prop value analysis
+        if 'h2h' in show_markets and odds_data['moneyline']:
+            ml = odds_data['moneyline']
+            rows.append(["Moneyline", 
+                         f"{next((o['price'] for o in ml['outcomes'] if o['name'] == game.away), 'N/A')}", 
+                         f"{next((o['price'] for o in ml['outcomes'] if o['name'] == game.home), 'N/A')}"])
+        
+        if 'totals' in show_markets and odds_data['totals']:
+            total = odds_data['totals']
+            over = next((o for o in total['outcomes'] if o['name'] == 'Over'), None)
+            under = next((o for o in total['outcomes'] if o['name'] == 'Under'), None)
+            if over and under:
+                rows.append(["Over", over['point'], over['price']])
+                rows.append(["Under", under['point'], under['price']])
+        
+        if 'spreads' in show_markets and odds_data['spreads']:
+            spread = odds_data['spreads']
+            away_spread = next((o for o in spread['outcomes'] if o['name'] == game.away), None)
+            home_spread = next((o for o in spread['outcomes'] if o['name'] == game.home), None)
+            if away_spread and home_spread:
+                rows.append(["Spread", 
+                            f"{away_spread['point']} ({away_spread['price']})", 
+                            f"{home_spread['point']} ({home_spread['price']})"])
+        
+        # Display the table
+        if rows:
+            st.table(pd.DataFrame(rows, columns=headers))
+        else:
+            st.warning("No odds data available for selected markets")
+    
+    def run(self):
+        """Main app execution"""
+        self._render_sidebar()
+        
+        st.title("📊 Live Odds Dashboard")
+        st.markdown("---")
+        
+        selected_sports = st.session_state.get("league_select", ["NBA", "NFL"])
+        show_markets = st.session_state.get("markets_select", Config.MARKETS)
+        
+        for sport in selected_sports:
+            st.header(f"🏟️ {sport} Games")
+            
+            if not st.session_state.games.get(sport, []):
+                st.warning(f"No current games found for {sport}")
+                continue
+                
+            for game in st.session_state.games[sport]:
+                self._render_game_card(game, show_markets)
 
-# --- Footer ---
-st.markdown("---")
-st.markdown("""
-<p style="text-align:center;color:#888">
-Omniscience Elite v3.0 &copy; 2025 | 
-<span style="color:#00ffe7">Real-time odds refresh every 30 minutes</span>
-</p>
-""", unsafe_allow_html=True)
+# ======================
+# APP EXECUTION
+# ======================
+if __name__ == "__main__":
+    app = OddsApp()
+    app.run()
