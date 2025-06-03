@@ -8,7 +8,7 @@ import numpy as np
 from datetime import datetime
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.utils import secure_filename
-
+import flask
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', 'omniscient-divine-key')
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///omniscience.db')
