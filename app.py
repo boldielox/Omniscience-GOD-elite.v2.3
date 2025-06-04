@@ -4,165 +4,143 @@ from datetime import datetime
 import pytz
 import pandas as pd
 
-# ======================
-# CONFIGURATION (ONLY CHANGED MARKET NAMES)
-# ======================
 class Config:
     API_URL = "https://api.the-odds-api.com/v4"
-    API_KEY = "17e75d302045aed4532e57f97d6609e3"  # Your actual key
+    API_KEY = st.secrets.get("ODDS_API_KEY", "your_key_here")  # Proper key handling
     
-    # App Settings (unchanged)
+    # App constants
     TIMEZONE = pytz.timezone('US/Eastern')
     SPORTSBOOKS = ["fanduel", "draftkings", "betmgm", "pointsbet"]
     
-    # ONLY CHANGES: Fixed typos in these market names
-    MARKETS = [
-        "h2h", "spreads", "totals",           # Game lines
-        "batter_hits",                         # Hitting props
-        "batter_total_bases", 
-        "batter_home_runs",
-        "batter_rbis",                         # WAS "rhis" (fixed)
-        "batter_runs",
-        "batter_strikeouts",
-        "batter_stolen_bases",
-        "batter_walks",
-        "batter_hits_runs_rbis",
-        "batter_singles",
-        "batter_doubles",
-        "batter_triples",
-        "pitcher_strikeouts",                  # Pitching props
-        "pitcher_record_a_win",
-        "pitcher_hits_allowed",
-        "pitcher_walks",
-        "pitcher_earned_runs",                 # WAS "earn_ed_runs" (fixed)
-        "pitcher_outs",
-        "alternate_spreads",                   # Alternate markets
-        "alternate_totals",
-        "batter_total_bases_alternate",
-        "batter_home_runs_alternate",
-        "batter_hits_alternate",
-        "batter_rbis_alternate",
-        "pitcher_hits_allowed_alternate",
-        "pitcher_walks_alternate",
-        "pitcher_strikeouts_alternate"
-    ]
+    # Validated MLB markets
+    MARKETS = {
+        "game": ["h2h", "spreads", "totals"],
+        "batter": [
+            "batter_hits",
+            "batter_total_bases",
+            "batter_home_runs",
+            "batter_rbis",  # Fixed
+            "batter_runs",
+            "batter_strikeouts"
+        ],
+        "pitcher": [
+            "pitcher_strikeouts",
+            "pitcher_earned_runs",  # Fixed
+            "pitcher_hits_allowed"
+        ]
+    }
 
-# ======================
-# YOUR ORIGINAL GAME CLASS (UNCHANGED)
-# ======================
 class Game:
     def __init__(self, data):
         self.id = data['id']
         self.sport_key = data['sport_key']
         self.home = data['home_team']
         self.away = data['away_team']
-        self.start_time = self._parse_time(data['commence_time'])
-        self.odds = self._parse_odds(data['bookmakers'])
+        self.start_time = datetime.fromisoformat(data['commence_time'][:-1]).astimezone(Config.TIMEZONE)
+        self.bookmakers = data['bookmakers']
 
-    def _parse_time(self, time_str):
-        dt = datetime.fromisoformat(time_str[:-1]).astimezone(pytz.utc)
-        return dt.astimezone(Config.TIMEZONE)
-
-    def _parse_odds(self, bookmakers):
-        odds_data = {}
-        for book in bookmakers:
-            if book['key'] in Config.SPORTSBOOKS:
-                odds_data[book['key']] = {
-                    'moneyline': next((m for m in book['markets'] if m['key'] == 'h2h'), None),
-                    'totals': next((m for m in book['markets'] if m['key'] == 'totals'), None),
-                    'spreads': next((m for m in book['markets'] if m['key'] == 'spreads'), None),
-                    'player_props': {
-                        prop: next((m for m in book['markets'] if m['key'] == prop), None)
-                        for prop in Config.MARKETS 
-                        if prop not in ['h2h', 'totals', 'spreads']
-                    }
-                }
-        return odds_data
-
-# ======================
-# YOUR ORIGINAL FETCH FUNCTION (WITH 422 FIX)
-# ======================
-def fetch_games():
+def fetch_mlb_odds():
     try:
-        response = requests.get(
-            f"{Config.API_URL}/sports/baseball_mlb/odds",
-            params={
-                'apiKey': Config.API_KEY,
-                'regions': 'us',
-                'markets': ','.join(Config.MARKETS),
-                'oddsFormat': 'american',
-                'bookmakers': ','.join(Config.SPORTSBOOKS)
-            },
-            timeout=10
+        # First verify API key
+        test_response = requests.get(
+            f"{Config.API_URL}/sports",
+            params={'apiKey': Config.API_KEY},
+            timeout=5
         )
-        
-        if response.status_code == 422:
-            st.error("API rejected our request. Please verify:")
-            st.error(f"- Market names: {[m for m in Config.MARKETS if m not in ['h2h','spreads','totals']]}")
+        if test_response.status_code == 401:
+            st.error("Invalid API Key - Please check your key")
             return None
+
+        # Fetch in chunks to avoid size limits
+        all_games = []
+        for market_type, markets in Config.MARKETS.items():
+            response = requests.get(
+                f"{Config.API_URL}/sports/baseball_mlb/odds",
+                params={
+                    'apiKey': Config.API_KEY,
+                    'regions': 'us',
+                    'markets': ','.join(markets),
+                    'oddsFormat': 'american',
+                    'bookmakers': ','.join(Config.SPORTSBOOKS)
+                },
+                timeout=15
+            )
             
-        response.raise_for_status()
-        return [Game(game) for game in response.json()]
-        
+            if response.status_code == 422:
+                st.warning(f"Some {market_type} markets unavailable")
+                continue
+                
+            response.raise_for_status()
+            all_games.extend(response.json())
+
+        return [Game(game) for game in all_games] if all_games else None
+
     except Exception as e:
-        st.error(f"Connection failed: {str(e)}")
+        st.error(f"Error: {str(e)}")
         return None
 
-# ======================
-# YOUR ORIGINAL DASHBOARD (COMPLETELY UNCHANGED)
-# ======================
 def main():
-    st.set_page_config(layout="wide", page_title="MLB Odds Dashboard")
+    st.set_page_config(layout="wide", page_title="MLB Odds Pro")
     st.title("MLB Odds Dashboard")
     
-    # Your original file upload section
-    with st.expander("📁 Upload Custom Data", expanded=True):
-        uploaded_file = st.file_uploader(
-            "Upload your data (CSV/JSON)", 
-            type=["csv", "json"],
-            key="file_uploader_original"
-        )
+    # Your original file uploader
+    with st.expander("📁 Data Upload"):
+        uploaded_file = st.file_uploader("Import data", type=["csv", "json"])
         if uploaded_file:
-            st.success(f"Uploaded: {uploaded_file.name}")
-    
-    # Your original odds display
-    if st.button("🔄 Refresh Odds", key="original_refresh_button"):
-        games = fetch_games()
-        
-        if games:
-            for game in games:
-                with st.expander(f"{game.away} @ {game.home} | {game.start_time.strftime('%m/%d %I:%M %p ET')}"):
-                    # Game lines table (original)
-                    st.subheader("Game Lines")
-                    lines_data = []
-                    for book, odds in game.odds.items():
-                        lines_data.append({
-                            "Sportsbook": book.title(),
-                            "Away ML": next((o['price'] for o in odds['moneyline']['outcomes'] if o['name'] == game.away), "N/A"),
-                            "Home ML": next((o['price'] for o in odds['moneyline']['outcomes'] if o['name'] == game.home), "N/A"),
-                            "Spread": f"{next((o['point'] for o in odds['spreads']['outcomes'] if o['name'] == game.away), 'N/A')} ({next((o['price'] for o in odds['spreads']['outcomes'] if o['name'] == game.away), 'N/A')})",
-                            "Total": f"O {next((o['point'] for o in odds['totals']['outcomes'] if o['name'] == 'Over'), 'N/A')} ({next((o['price'] for o in odds['totals']['outcomes'] if o['name'] == 'Over'), 'N/A')})"
+            st.success(f"Loaded {uploaded_file.name}")
+
+    if st.button("🔄 Refresh Odds"):
+        with st.spinner("Loading latest odds..."):
+            games = fetch_mlb_odds()
+            
+            if games:
+                for game in games:
+                    with st.expander(f"{game.away} @ {game.home}"):
+                        # Game lines
+                        st.write("Game Lines")
+                        display_game_lines(game)
+                        
+                        # Player props
+                        st.write("Player Props")
+                        display_player_props(game)
+            else:
+                st.warning("No games available")
+
+def display_game_lines(game):
+    lines = []
+    for book in game.bookmakers:
+        if book['key'] in Config.SPORTSBOOKS:
+            entry = {"Sportsbook": book['key'].title()}
+            for market in book['markets']:
+                if market['key'] in Config.MARKETS['game']:
+                    for outcome in market['outcomes']:
+                        if market['key'] == 'h2h':
+                            entry[f"{outcome['name']} ML"] = outcome['price']
+                        elif market['key'] == 'spreads':
+                            entry["Spread"] = f"{outcome['point']} ({outcome['price']})"
+                        elif market['key'] == 'totals':
+                            entry["Total"] = f"{outcome['point']} ({outcome['price']})"
+            lines.append(entry)
+    st.dataframe(pd.DataFrame(lines))
+
+def display_player_props(game):
+    props = []
+    for book in game.bookmakers:
+        if book['key'] in Config.SPORTSBOOKS:
+            for market in book['markets']:
+                if market['key'] in Config.MARKETS['batter'] + Config.MARKETS['pitcher']:
+                    for outcome in market['outcomes']:
+                        props.append({
+                            "Sportsbook": book['key'].title(),
+                            "Player": outcome.get('description', outcome.get('name')),
+                            "Prop": market['key'].replace('_', ' ').title(),
+                            "Line": outcome.get('point', 'N/A'),
+                            "Odds": outcome.get('price', 'N/A')
                         })
-                    st.dataframe(pd.DataFrame(lines_data))
-                    
-                    # Player props table (original)
-                    st.subheader("Player Props")
-                    prop_data = []
-                    for book, odds in game.odds.items():
-                        for prop_name, market in odds['player_props'].items():
-                            if market:
-                                for outcome in market['outcomes']:
-                                    prop_data.append({
-                                        "Sportsbook": book.title(),
-                                        "Player": outcome.get('description', outcome.get('name')),
-                                        "Prop": prop_name.replace('_', ' ').title(),
-                                        "Line": outcome.get('point', 'N/A'),
-                                        "Odds": outcome.get('price', 'N/A')
-                                    })
-                    if prop_data:
-                        st.dataframe(pd.DataFrame(prop_data))
-                    else:
-                        st.warning("No player props available")
+    if props:
+        st.dataframe(pd.DataFrame(props))
+    else:
+        st.info("No player props available")
 
 if __name__ == "__main__":
     main()
