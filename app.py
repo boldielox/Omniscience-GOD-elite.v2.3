@@ -165,10 +165,6 @@ class OddsApp:
         """Initialize session state variables"""
         if 'games' not in st.session_state:
             st.session_state.games = {sport: [] for sport in Config.SPORTS.keys()}
-        if 'selected_sports' not in st.session_state:
-            st.session_state.selected_sports = ["NBA", "NFL"]
-        if 'markets_select' not in st.session_state:
-            st.session_state.markets_select = Config.MARKETS
         if 'omniscience_chat' not in st.session_state:
             st.session_state.omniscience_chat = []
 
@@ -186,26 +182,24 @@ class OddsApp:
             st.title("⚙️ Controls")
             st.markdown("---")
 
-            # League selection
-            selected_sports = st.multiselect(
+            # League selection widget manages session state automatically
+            st.multiselect(
                 "SELECT LEAGUES",
                 list(Config.SPORTS.keys()),
-                default=st.session_state.selected_sports,
+                default=st.session_state.get("league_select", ["NBA", "NFL"]),
                 key="league_select"
             )
-            st.session_state.selected_sports = selected_sports
 
-            # Display options
+            # Markets to show widget manages session state automatically
             st.markdown("### 📊 Display Options")
-            show_markets = st.multiselect(
+            st.multiselect(
                 "MARKETS TO SHOW",
                 Config.MARKETS,
-                default=Config.MARKETS,
+                default=st.session_state.get("markets_select", Config.MARKETS),
                 key="markets_select"
             )
-            st.session_state.markets_select = show_markets
 
-            # Refresh info
+            # Refresh info and button
             if 'last_refresh' in st.session_state:
                 st.markdown(f"🔄 Last refresh: {st.session_state.last_refresh.strftime('%H:%M:%S')}")
             if st.button("🔄 Manual Refresh"):
@@ -222,10 +216,11 @@ class OddsApp:
     def _force_refresh(self):
         """Force immediate data refresh for selected sports"""
         st.session_state.last_refresh = datetime.now()
-        for sport in st.session_state.selected_sports:
+        selected_sports = st.session_state.get("league_select", ["NBA", "NFL"])
+        for sport in selected_sports:
             sport_key = Config.SPORTS[sport]
             st.session_state.games[sport] = OddsAPI.fetch_games(sport_key)
-        st.rerun()
+        st.experimental_rerun()
 
     def _render_game_card(self, game, show_markets):
         """Render an individual game card"""
@@ -311,7 +306,7 @@ class OddsApp:
         st.title("📊 Live Odds Dashboard")
         st.markdown("---")
 
-        selected_sports = st.session_state.get("selected_sports", ["NBA", "NFL"])
+        selected_sports = st.session_state.get("league_select", ["NBA", "NFL"])
         show_markets = st.session_state.get("markets_select", Config.MARKETS)
 
         for sport in selected_sports:
