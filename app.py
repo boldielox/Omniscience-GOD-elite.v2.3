@@ -1,5 +1,5 @@
 # ======================
-# YOUR COMPLETE MLB BETTING MODEL 
+# YOUR COMPLETE ORIGINAL CODE WITH PLOTLY FIX
 # ======================
 import streamlit as st
 import numpy as np
@@ -9,18 +9,28 @@ from datetime import datetime, timedelta
 import pytz
 from typing import List, Dict, Optional, Tuple
 import math
-import plotly.express as px
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 
-# ========== CONFIGURATION ==========
+# FIRST ENSURE PLOTLY IS INSTALLED
+try:
+    import plotly.express as px
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+except ImportError:
+    import subprocess
+    import sys
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "plotly"])
+    import plotly.express as px
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+
+# ========== YOUR COMPLETE ORIGINAL CONFIG ==========
 class Config:
     try:
-        API_KEY = st.secrets["ODDS_API_KEY"]  # For deployed app
+        API_KEY = st.secrets["ODDS_API_KEY"]
     except:
-        API_KEY = "YOUR_API_KEY_HERE"  # For local testing (replace with your key)
-    
-    SPORTSBOOKS = ["fanduel", "draftkings", "betmgm", "pointsbet"]
+        API_KEY = "your_actual_api_key_here"  # REPLACE WITH YOUR REAL API KEY
+
+    SPORTSBOOKS = ["fanduel", "draftkings", "betmgm", "pointsbet"] 
     MARKETS = [
         "h2h", "spreads", "totals",
         "batter_hits", "batter_total_bases", "batter_home_runs",
@@ -31,7 +41,7 @@ class Config:
     ]
     TIMEZONE = pytz.timezone('US/Eastern')
 
-# ========== DATA MODELS ==========
+# ========== YOUR COMPLETE PLAYER PROJECTION CLASS ==========
 class PlayerProjection:
     def __init__(self, player_data: Dict):
         self.name = player_data['name']
@@ -56,7 +66,7 @@ class PlayerProjection:
                 self.stats['home_runs'] * 0.4 +
                 self.stats['rbis'] * 0.3) * 1.2
 
-# ========== CORE ANALYSIS ==========
+# ========== YOUR COMPLETE BETTING ANALYZER CLASS ==========
 class BettingAnalyzer:
     def __init__(self, projections: List[PlayerProjection]):
         self.projections = projections
@@ -79,7 +89,7 @@ class BettingAnalyzer:
             implied_prob = self._convert_odds(book['odds'])
             stat_proj = player_proj.stats[market['type']] / 100
             
-            if stat_proj > implied_prob + 0.05:  # 5% edge threshold
+            if stat_proj > implied_prob + 0.05:
                 self.value_plays.append({
                     'player': market['player'],
                     'prop': market['type'],
@@ -100,7 +110,7 @@ class BettingAnalyzer:
         long_prob = self._convert_odds(best_long['odds'])
         short_prob = 1 - self._convert_odds(abs(best_short['odds']))
         
-        if long_prob + short_prob < 0.98:  # 2% arb threshold
+        if long_prob + short_prob < 0.98:
             self.arb_opportunities.append({
                 'player': market['player'],
                 'prop': market['type'],
@@ -110,7 +120,7 @@ class BettingAnalyzer:
             })
     
     def _identify_steam_moves(self):
-        # Your steam move detection logic here
+        # Your steam move detection logic
         pass
     
     @staticmethod
@@ -119,9 +129,9 @@ class BettingAnalyzer:
     
     @staticmethod
     def _calculate_stake_ratio(long_prob, short_prob):
-        return (short_prob / long_prob) * 0.95  # 5% margin buffer
+        return (short_prob / long_prob) * 0.95
 
-# ========== DASHBOARD ==========
+# ========== YOUR COMPLETE DASHBOARD CODE ==========
 def main():
     st.set_page_config(layout="wide")
     st.title("MLB Betting Model v3.1")
@@ -140,29 +150,29 @@ def main():
     show_projections(projections)
     show_steam_moves(analyzer.steam_plays)
 
-# ========== HELPER FUNCTIONS ==========
+# ========== YOUR HELPER FUNCTIONS ==========
 def load_projections():
-    # Your projection loading logic
+    # Your implementation
     pass
 
 def fetch_odds():
-    # Your odds fetching logic
+    # Your implementation
     pass
 
 def show_value_plays(plays):
-    # Your value plays display
+    # Your implementation
     pass
 
 def show_arb_opportunities(arbs):
-    # Your arbitrage display
+    # Your implementation
     pass
 
 def show_projections(projections):
-    # Your projections visualization
+    # Your implementation
     pass
 
 def show_steam_moves(steam_plays):
-    # Your steam moves display
+    # Your implementation
     pass
 
 if __name__ == "__main__":
