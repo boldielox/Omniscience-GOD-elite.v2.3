@@ -20,19 +20,24 @@ class Config:
         "Tennis": "tennis_atp"
     }
     SPORTSBOOKS = ["FanDuel", "DraftKings", "BetMGM", "Caesars", "PointsBet"]
-    MARKETS = ["h2h", "totals", "spreads"]
+    MARKETS = ["h2h", "spreads", "totals"]
+    PLAYER_MARKETS = {
+        "NBA": ["player_points", "player_rebounds", "player_assists", "player_threes"],
+        "MLB": ["player_home_runs", "player_hits", "player_rbis", "player_strikeouts"]
+    }
 
 # ======================
 # DATA MODELS
 # ======================
 class Game:
-    def __init__(self, data):
+    def __init__(self, data, sport_name):
         self.id = data['id']
         self.sport_key = data['sport_key']
         self.home = data['home_team']
         self.away = data['away_team']
         self.start_time = self._parse_time(data['commence_time'])
         self.odds = self._parse_odds(data['bookmakers'])
+        self.player_props = self._parse_player_props(data['bookmakers'], sport_name)
 
     def _parse_time(self, time_str):
         dt = datetime.fromisoformat(time_str[:-1]).astimezone(pytz.utc)
@@ -48,6 +53,26 @@ class Game:
                     'spreads': next((m for m in book['markets'] if m['key'] == 'spreads'), None)
                 }
         return odds_data
+
+    def _parse_player_props(self, bookmakers, sport_name):
+        props = []
+        if sport_name not in Config.PLAYER_MARKETS:
+            return props
+        player_markets = Config.PLAYER_MARKETS[sport_name]
+        for book in bookmakers:
+            if book['key'] not in Config.SPORTSBOOKS:
+                continue
+            for market in book['markets']:
+                if market['key'] in player_markets:
+                    for outcome in market['outcomes']:
+                        props.append({
+                            "book": book['key'],
+                            "market": market['key'],
+                            "player": outcome.get('description', 'N/A'),
+                            "line": outcome.get('point', 'N/A'),
+                            "odds": outcome['price']
+                        })
+        return props
 
 # ======================
 # API SERVICE
@@ -73,13 +98,16 @@ class OddsAPI:
             return False
 
     @staticmethod
-    def fetch_games(sport_key):
+    def fetch_games(sport_key, sport_name):
         try:
+            markets = Config.MARKETS.copy()
+            if sport_name in Config.PLAYER_MARKETS:
+                markets += Config.PLAYER_MARKETS[sport_name]
             url = f"{Config.API_URL}/sports/{sport_key}/odds"
             params = {
                 'apiKey': Config.API_KEY,
                 'regions': 'us',
-                'markets': ','.join(Config.MARKETS),
+                'markets': ','.join(markets),
                 'oddsFormat': 'american',
                 'dateFormat': 'iso'
             }
@@ -88,12 +116,31 @@ class OddsAPI:
                 games = response.json()
                 if not games:
                     st.warning(f"No current games for {sport_key}")
-                return [Game(game) for game in games[:Config.MAX_GAMES]]
+                return [Game(game, sport_name) for game in games[:Config.MAX_GAMES]]
             st.error(f"API Error: {response.status_code} - {response.text}")
             return []
         except Exception as e:
             st.error(f"API Connection Failed: {str(e)}")
             return []
+
+# ======================
+# PREDICTIVE MODEL STUBS (Replace with your model logic/API)
+# ======================
+def get_model_analysis(game):
+    # Replace with your predictive model logic or API call
+    return {
+        "prediction": "Home Win",
+        "flag": "High Confidence",
+        "explanation": "Model sees a strong trend in recent games and injury data."
+    }
+
+def get_player_prop_analysis(prop):
+    # Replace with your predictive model logic or API call for player props
+    return {
+        "prediction": "Over",
+        "flag": "Edge",
+        "explanation": "Player has exceeded this line in 7 of last 8 games."
+    }
 
 # ======================
 # CORE APP FUNCTIONALITY
@@ -162,14 +209,12 @@ class OddsApp:
         with st.sidebar:
             st.title("⚙️ Controls")
             st.markdown("---")
-
             st.multiselect(
                 "SELECT LEAGUES",
                 list(Config.SPORTS.keys()),
                 default=st.session_state.get("league_select", ["NBA", "NFL"]),
                 key="league_select"
             )
-
             st.markdown("### 📊 Display Options")
             st.multiselect(
                 "MARKETS TO SHOW",
@@ -177,12 +222,10 @@ class OddsApp:
                 default=st.session_state.get("markets_select", Config.MARKETS),
                 key="markets_select"
             )
-
             if 'last_refresh' in st.session_state:
                 st.markdown(f"🔄 Last refresh: {st.session_state.last_refresh.strftime('%H:%M:%S')}")
             if st.button("🔄 Manual Refresh"):
                 self._force_refresh()
-
             st.markdown("---")
             st.markdown("### 🔌 API Status")
             if Config.API_KEY == "demo":
@@ -195,7 +238,7 @@ class OddsApp:
         selected_sports = st.session_state.get("league_select", ["NBA", "NFL"])
         for sport in selected_sports:
             sport_key = Config.SPORTS[sport]
-            st.session_state.games[sport] = OddsAPI.fetch_games(sport_key)
+            st.session_state.games[sport] = OddsAPI.fetch_games(sport_key, sport)
         st.rerun()
 
     def _render_game_card(self, game, show_markets):
@@ -205,9 +248,24 @@ class OddsApp:
                 <h3>{game.away} @ {game.home}</h3>
                 <p>⏰ {game.start_time.strftime('%a %m/%d %I:%M %p ET')}</p>
             """, unsafe_allow_html=True)
+            # Core analysis for this game
+            model_info = get_model_analysis(game)
+            if model_info:
+                st.markdown(f"**Model Prediction:** {model_info['prediction']}  \n"
+                            f"**Flag:** {model_info['flag']}  \n"
+                            f"**Reason:** {model_info['explanation']}")
+            # Odds tables
             for book in Config.SPORTSBOOKS:
                 if book in game.odds:
                     self._render_odds_table(book, game.odds[book], show_markets, game)
+            # Player props
+            if game.player_props:
+                st.markdown("**Player Props:**")
+                for prop in game.player_props:
+                    st.markdown(f"- {prop['player']} ({prop['market']}): {prop['line']} @ {prop['odds']} [{prop['book']}]")
+                    prop_analysis = get_player_prop_analysis(prop)
+                    if prop_analysis:
+                        st.markdown(f"  - **Model:** {prop_analysis['prediction']} / {prop_analysis['flag']} / {prop_analysis['explanation']}")
             st.markdown("</div>", unsafe_allow_html=True)
 
     def _render_odds_table(self, book_name, odds_data, show_markets, game):
