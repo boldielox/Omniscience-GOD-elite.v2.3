@@ -3,6 +3,7 @@ import requests
 from datetime import datetime
 import pytz
 import pandas as pd
+import copy
 
 # ======================
 # CONFIGURATION
@@ -124,23 +125,72 @@ class OddsAPI:
             return {}
 
 # ======================
-# PREDICTIVE MODEL STUBS (Replace with your model logic/API)
+# LINE MOVEMENT & SHARP INDICATORS
 # ======================
-def get_model_analysis(game):
-    # Replace with your predictive model logic or API call
-    return {
-        "prediction": "Home Win",
-        "flag": "High Confidence",
-        "explanation": "Model sees a strong trend in recent games and injury data."
-    }
+def update_odds_history(games):
+    now = datetime.now().isoformat()
+    if 'odds_history' not in st.session_state:
+        st.session_state.odds_history = {}
+    for game in games:
+        game_id = game.id
+        odds_snapshot = copy.deepcopy(game.odds)
+        if game_id not in st.session_state.odds_history:
+            st.session_state.odds_history[game_id] = []
+        st.session_state.odds_history[game_id].append({'timestamp': now, 'odds': odds_snapshot})
 
-def get_player_prop_analysis(prop):
-    # Replace with your predictive model logic or API call for player props
-    return {
-        "prediction": "Over",
-        "flag": "Edge",
-        "explanation": "Player has exceeded this line in 7 of last 8 games."
-    }
+def get_line_movement(game_id):
+    history = st.session_state.odds_history.get(game_id, [])
+    if len(history) < 2:
+        return "No movement"
+    last = history[-1]['odds']
+    prev = history[-2]['odds']
+    movement = []
+    for book in last:
+        for market in last[book]:
+            last_market = last[book][market]
+            prev_market = prev[book][market]
+            if last_market and prev_market and last_market != prev_market:
+                movement.append(f"{book} {market}: {format_market(prev_market)} → {format_market(last_market)}")
+    return "; ".join(movement) if movement else "No movement"
+
+def format_market(market):
+    if not market:
+        return "N/A"
+    if 'outcomes' in market:
+        return ", ".join([f"{o['name']} {o.get('point','')}: {o['price']}" for o in market['outcomes']])
+    return str(market)
+
+def get_sharp_indicator(game_id):
+    history = st.session_state.odds_history.get(game_id, [])
+    if len(history) < 2:
+        return "No sharp moves detected"
+    last = history[-1]['odds']
+    prev = history[-2]['odds']
+    sharp_moves = []
+    for book in last:
+        last_spread = last[book]['spreads']
+        prev_spread = prev[book]['spreads']
+        if last_spread and prev_spread:
+            try:
+                for team in ['Away', 'Home']:
+                    last_team = next((o for o in last_spread['outcomes'] if o['name'] == team), None)
+                    prev_team = next((o for o in prev_spread['outcomes'] if o['name'] == team), None)
+                    if last_team and prev_team:
+                        if abs(float(last_team['point']) - float(prev_team['point'])) >= 1.5:
+                            sharp_moves.append(f"{book} sharp {team} spread: {prev_team['point']} → {last_team['point']}")
+            except Exception:
+                continue
+    # Book disagreement: if any book's line is >1 point different from consensus
+    if len(last) > 1:
+        lines = []
+        for book in last:
+            spread = last[book]['spreads']
+            if spread and 'outcomes' in spread:
+                for o in spread['outcomes']:
+                    lines.append(float(o['point']))
+        if lines and (max(lines) - min(lines)) >= 1.5:
+            sharp_moves.append("Book disagreement: spread difference > 1.5")
+    return "; ".join(sharp_moves) if sharp_moves else "No sharp moves detected"
 
 # ======================
 # CORE APP FUNCTIONALITY
@@ -253,6 +303,7 @@ class OddsApp:
         for sport in selected_sports:
             sport_key = Config.SPORTS[sport]
             games = OddsAPI.fetch_games(sport_key, sport, standard_markets)
+            update_odds_history(games)
             # Player props per event
             player_markets = []
             if sport == "NBA":
@@ -292,11 +343,14 @@ class OddsApp:
                 <h3>{game.away} @ {game.home}</h3>
                 <p>⏰ {game.start_time.strftime('%a %m/%d %I:%M %p ET')}</p>
             """, unsafe_allow_html=True)
-            model_info = get_model_analysis(game)
-            if model_info:
-                st.markdown(f"**Model Prediction:** {model_info['prediction']}  \n"
-                            f"**Flag:** {model_info['flag']}  \n"
-                            f"**Reason:** {model_info['explanation']}")
+            # Show line movement
+            line_movement = get_line_movement(game.id)
+            if line_movement != "No movement":
+                st.markdown(f"**Line Movement:** {line_movement}")
+            # Sharp indicator
+            sharp_indicator = get_sharp_indicator(game.id)
+            if sharp_indicator != "No sharp moves detected":
+                st.markdown(f"**Sharp Indicator:** {sharp_indicator}")
             for book in Config.SPORTSBOOKS:
                 if book in game.odds:
                     self._render_odds_table(book, game.odds[book], show_markets, game)
@@ -304,9 +358,6 @@ class OddsApp:
                 st.markdown("**Player Props:**")
                 for prop in game.player_props:
                     st.markdown(f"- {prop['player']} ({prop['market']}): {prop['line']} @ {prop['odds']} [{prop['book']}]")
-                    prop_analysis = get_player_prop_analysis(prop)
-                    if prop_analysis:
-                        st.markdown(f"  - **Model:** {prop_analysis['prediction']} / {prop_analysis['flag']} / {prop_analysis['explanation']}")
             st.markdown("</div>", unsafe_allow_html=True)
 
     def _render_odds_table(self, book_name, odds_data, show_markets, game):
