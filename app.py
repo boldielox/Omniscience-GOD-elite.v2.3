@@ -4,7 +4,7 @@ from typing import Dict, List, Optional
 from datetime import datetime
 import copy
 
-# ---- Paste your SportsGameOddsClient class here (no API key hardcoded) ----
+https://api.sportsgameodds.com/v2/sports/# ---- Paste your SportsGameOddsClient class here (no API key hardcoded) ----
 
 # Example usage:
 client = SportsGameOddsClient(st.secrets["SPORTSGAME_API_KEY"])
