@@ -17,15 +17,12 @@ class Config:
         "MLB": "baseball_mlb",
         "NBA": "basketball_nba",
         "NFL": "americanfootball_nfl",
-        "NHL": "icehockey_nhl",
-        "Tennis": "tennis_atp"
+        "NHL": "icehockey_nhl"
     }
     SPORTSBOOKS = ["FanDuel", "DraftKings", "BetMGM", "Caesars", "PointsBet"]
-    STANDARD_MARKETS = ["h2h", "spreads", "totals"]
-    PLAYER_MARKETS = {
-        "NBA": ["player_points", "player_rebounds", "player_assists", "player_threes"],
-        "MLB": ["player_home_runs", "player_hits", "player_rbis", "player_strikeouts"]
-    }
+    MAIN_MARKETS = ["h2h", "spreads", "totals"]
+    MLB_PLAYER_MARKETS = ["player_home_runs"]
+    NBA_PLAYER_MARKETS = ["player_rebounds", "player_points"]
 
 # ======================
 # DATA MODELS
@@ -62,66 +59,36 @@ class Game:
 # ======================
 class OddsAPI:
     @staticmethod
-    def verify_key():
-        try:
-            url = f"{Config.API_URL}/sports"
-            response = requests.get(url, params={'apiKey': Config.API_KEY})
-            if response.status_code == 200:
-                remaining = response.headers.get('x-requests-remaining', 'Unknown')
-                st.success(f"✅ API Key Valid (Remaining requests: {remaining})")
-                return True
-            elif response.status_code == 401:
-                st.error("❌ Invalid API Key - Check your GitHub Secrets")
-                return False
-            else:
-                st.warning(f"⚠️ API Response: {response.status_code} - {response.text}")
-                return False
-        except Exception as e:
-            st.error(f"🚨 Connection Error: {str(e)}")
-            return False
-
-    @staticmethod
-    def fetch_games(sport_key, sport_name, markets):
-        try:
-            url = f"{Config.API_URL}/sports/{sport_key}/odds"
-            params = {
-                'apiKey': Config.API_KEY,
-                'regions': 'us',
-                'markets': ','.join(markets),
-                'oddsFormat': 'american',
-                'dateFormat': 'iso'
-            }
-            response = requests.get(url, params=params)
-            if response.ok:
-                games = response.json()
-                if not games:
-                    st.warning(f"No current games for {sport_key}")
-                return [Game(game, sport_name) for game in games[:Config.MAX_GAMES]]
-            st.error(f"API Error: {response.status_code} - {response.text}")
-            return []
-        except Exception as e:
-            st.error(f"API Connection Failed: {str(e)}")
-            return []
+    def fetch_games(sport_key, sport_name):
+        url = f"{Config.API_URL}/sports/{sport_key}/odds"
+        params = {
+            'apiKey': Config.API_KEY,
+            'regions': 'us',
+            'markets': ','.join(Config.MAIN_MARKETS),
+            'oddsFormat': 'american',
+            'dateFormat': 'iso'
+        }
+        response = requests.get(url, params=params)
+        if response.ok:
+            games = response.json()
+            return [Game(game, sport_name) for game in games[:Config.MAX_GAMES]]
+        st.error(f"API Error: {response.status_code} - {response.text}")
+        return []
 
     @staticmethod
     def fetch_player_props(event_id, player_markets):
-        try:
-            url = f"{Config.API_URL}/events/{event_id}/odds"
-            params = {
-                'apiKey': Config.API_KEY,
-                'regions': 'us',
-                'markets': ','.join(player_markets),
-                'oddsFormat': 'american',
-                'dateFormat': 'iso'
-            }
-            response = requests.get(url, params=params)
-            if response.ok:
-                return response.json()
-            else:
-                st.error(f"Player Props API Error: {response.status_code} - {response.text}")
-                return {}
-        except Exception as e:
-            st.error(f"Player Props Connection Failed: {str(e)}")
+        url = f"{Config.API_URL}/events/{event_id}/odds"
+        params = {
+            'apiKey': Config.API_KEY,
+            'regions': 'us',
+            'markets': ','.join(player_markets),
+            'oddsFormat': 'american',
+            'dateFormat': 'iso'
+        }
+        response = requests.get(url, params=params)
+        if response.ok:
+            return response.json()
+        else:
             return {}
 
 # ======================
@@ -180,7 +147,6 @@ def get_sharp_indicator(game_id):
                             sharp_moves.append(f"{book} sharp {team} spread: {prev_team['point']} → {last_team['point']}")
             except Exception:
                 continue
-    # Book disagreement: if any book's line is >1 point different from consensus
     if len(last) > 1:
         lines = []
         for book in last:
@@ -199,7 +165,6 @@ class OddsApp:
     def __init__(self):
         self._setup_ui()
         self._init_session()
-        self._verify_api()
 
     def _setup_ui(self):
         st.set_page_config(
@@ -248,13 +213,6 @@ class OddsApp:
         if 'omniscience_chat' not in st.session_state:
             st.session_state.omniscience_chat = []
 
-    def _verify_api(self):
-        if Config.API_KEY == "demo":
-            st.warning("⚠️ Using DEMO MODE - Limited data only")
-        elif 'api_verified' not in st.session_state:
-            if OddsAPI.verify_key():
-                st.session_state.api_verified = True
-
     def _render_sidebar(self):
         with st.sidebar:
             st.title("⚙️ Controls")
@@ -262,28 +220,8 @@ class OddsApp:
             st.multiselect(
                 "SELECT LEAGUES",
                 list(Config.SPORTS.keys()),
-                default=st.session_state.get("league_select", ["NBA", "NFL"]),
+                default=st.session_state.get("league_select", ["NBA", "MLB"]),
                 key="league_select"
-            )
-            st.markdown("### 📊 Standard Markets")
-            st.multiselect(
-                "Select Standard Markets",
-                Config.STANDARD_MARKETS,
-                default=st.session_state.get("markets_select", Config.STANDARD_MARKETS),
-                key="markets_select"
-            )
-            st.markdown("### 🏀⚾ Player Prop Markets")
-            st.multiselect(
-                "NBA Player Props",
-                Config.PLAYER_MARKETS["NBA"],
-                default=st.session_state.get("nba_player_markets", Config.PLAYER_MARKETS["NBA"]),
-                key="nba_player_markets"
-            )
-            st.multiselect(
-                "MLB Player Props",
-                Config.PLAYER_MARKETS["MLB"],
-                default=st.session_state.get("mlb_player_markets", Config.PLAYER_MARKETS["MLB"]),
-                key="mlb_player_markets"
             )
             if 'last_refresh' in st.session_state:
                 st.markdown(f"🔄 Last refresh: {st.session_state.last_refresh.strftime('%H:%M:%S')}")
@@ -298,26 +236,25 @@ class OddsApp:
 
     def _force_refresh(self):
         st.session_state.last_refresh = datetime.now()
-        selected_sports = st.session_state.get("league_select", ["NBA", "NFL"])
-        standard_markets = st.session_state.get("markets_select", Config.STANDARD_MARKETS)
+        selected_sports = st.session_state.get("league_select", ["NBA", "MLB"])
         for sport in selected_sports:
             sport_key = Config.SPORTS[sport]
-            games = OddsAPI.fetch_games(sport_key, sport, standard_markets)
+            games = OddsAPI.fetch_games(sport_key, sport)
             update_odds_history(games)
             # Player props per event
             player_markets = []
             if sport == "NBA":
-                player_markets = st.session_state.get("nba_player_markets", [])
+                player_markets = Config.NBA_PLAYER_MARKETS
             elif sport == "MLB":
-                player_markets = st.session_state.get("mlb_player_markets", [])
+                player_markets = Config.MLB_PLAYER_MARKETS
             for game in games:
                 if player_markets:
                     player_props_data = OddsAPI.fetch_player_props(game.id, player_markets)
-                    game.player_props = self._parse_player_props_from_event(player_props_data)
+                    game.player_props = self._parse_player_props_from_event(player_props_data, player_markets)
             st.session_state.games[sport] = games
         st.rerun()
 
-    def _parse_player_props_from_event(self, event_data):
+    def _parse_player_props_from_event(self, event_data, player_markets):
         props = []
         if not event_data or 'bookmakers' not in event_data:
             return props
@@ -325,7 +262,7 @@ class OddsApp:
             if book['key'] not in Config.SPORTSBOOKS:
                 continue
             for market in book['markets']:
-                if market['key'] in sum(Config.PLAYER_MARKETS.values(), []):  # flatten all player markets
+                if market['key'] in player_markets:
                     for outcome in market['outcomes']:
                         props.append({
                             "book": book['key'],
@@ -336,7 +273,7 @@ class OddsApp:
                         })
         return props
 
-    def _render_game_card(self, game, show_markets):
+    def _render_game_card(self, game):
         with st.container():
             st.markdown(f"""
             <div class="game-card">
@@ -353,30 +290,30 @@ class OddsApp:
                 st.markdown(f"**Sharp Indicator:** {sharp_indicator}")
             for book in Config.SPORTSBOOKS:
                 if book in game.odds:
-                    self._render_odds_table(book, game.odds[book], show_markets, game)
+                    self._render_odds_table(book, game.odds[book], game)
             if game.player_props:
                 st.markdown("**Player Props:**")
                 for prop in game.player_props:
                     st.markdown(f"- {prop['player']} ({prop['market']}): {prop['line']} @ {prop['odds']} [{prop['book']}]")
             st.markdown("</div>", unsafe_allow_html=True)
 
-    def _render_odds_table(self, book_name, odds_data, show_markets, game):
+    def _render_odds_table(self, book_name, odds_data, game):
         st.markdown(f"**{book_name}**")
-        headers = ["Market"] + [game.away, game.home] if 'h2h' in show_markets else ["Market", "Line", "Odds"]
+        headers = ["Market"] + [game.away, game.home]
         rows = []
-        if 'h2h' in show_markets and odds_data['moneyline']:
+        if odds_data['moneyline']:
             ml = odds_data['moneyline']
             rows.append(["Moneyline",
                          f"{next((o['price'] for o in ml['outcomes'] if o['name'] == game.away), 'N/A')}",
                          f"{next((o['price'] for o in ml['outcomes'] if o['name'] == game.home), 'N/A')}"])
-        if 'totals' in show_markets and odds_data['totals']:
+        if odds_data['totals']:
             total = odds_data['totals']
             over = next((o for o in total['outcomes'] if o['name'] == 'Over'), None)
             under = next((o for o in total['outcomes'] if o['name'] == 'Under'), None)
             if over and under:
                 rows.append(["Over", over['point'], over['price']])
                 rows.append(["Under", under['point'], under['price']])
-        if 'spreads' in show_markets and odds_data['spreads']:
+        if odds_data['spreads']:
             spread = odds_data['spreads']
             away_spread = next((o for o in spread['outcomes'] if o['name'] == game.away), None)
             home_spread = next((o for o in spread['outcomes'] if o['name'] == game.home), None)
@@ -389,44 +326,18 @@ class OddsApp:
         else:
             st.warning("No odds data available for selected markets")
 
-    def _render_omniscience_chat(self):
-        st.markdown("---")
-        st.subheader("🤖 Omniscience Model Chat")
-        with st.form("omniscience_chat_form", clear_on_submit=True):
-            user_query = st.text_input("Ask Omniscience about a flagged player, team, or any model insight:")
-            submitted = st.form_submit_button("Ask")
-            if submitted and user_query:
-                model_response = self._ask_omniscience(user_query)
-                st.session_state.omniscience_chat.append(("You", user_query))
-                st.session_state.omniscience_chat.append(("Omniscience", model_response))
-        for sender, message in st.session_state.omniscience_chat:
-            st.markdown(f"**{sender}:** {message}")
-
-    def _ask_omniscience(self, query):
-        try:
-            url = "http://localhost:8000/ask"  # Replace with your real model API endpoint
-            payload = {"query": query}
-            response = requests.post(url, json=payload, timeout=15)
-            response.raise_for_status()
-            result = response.json()
-            return result.get("answer", "No explanation returned by Omniscience.")
-        except Exception as e:
-            return f"Error communicating with Omniscience model: {e}"
-
     def run(self):
         self._render_sidebar()
         st.title("📊 Live Odds Dashboard")
         st.markdown("---")
-        selected_sports = st.session_state.get("league_select", ["NBA", "NFL"])
-        show_markets = st.session_state.get("markets_select", Config.STANDARD_MARKETS)
+        selected_sports = st.session_state.get("league_select", ["NBA", "MLB"])
         for sport in selected_sports:
             st.header(f"🏟️ {sport} Games")
             if not st.session_state.games.get(sport, []):
                 st.warning(f"No current games found for {sport}")
                 continue
             for game in st.session_state.games[sport]:
-                self._render_game_card(game, show_markets)
-        self._render_omniscience_chat()
+                self._render_game_card(game)
 
 if __name__ == "__main__":
     app = OddsApp()
