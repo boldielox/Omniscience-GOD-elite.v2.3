@@ -58,7 +58,6 @@ class OddsAPI:
         try:
             url = f"{Config.API_URL}/sports"
             response = requests.get(url, params={'apiKey': Config.API_KEY})
-
             if response.status_code == 200:
                 remaining = response.headers.get('x-requests-remaining', 'Unknown')
                 st.success(f"✅ API Key Valid (Remaining requests: {remaining})")
@@ -84,18 +83,14 @@ class OddsAPI:
                 'oddsFormat': 'american',
                 'dateFormat': 'iso'
             }
-
             response = requests.get(url, params=params)
-
             if response.ok:
                 games = response.json()
                 if not games:
                     st.warning(f"No current games for {sport_key}")
                 return [Game(game) for game in games[:Config.MAX_GAMES]]
-
             st.error(f"API Error: {response.status_code} - {response.text}")
             return []
-
         except Exception as e:
             st.error(f"API Connection Failed: {str(e)}")
             return []
@@ -201,7 +196,7 @@ class OddsApp:
         for sport in selected_sports:
             sport_key = Config.SPORTS[sport]
             st.session_state.games[sport] = OddsAPI.fetch_games(sport_key)
-        st.experimental_rerun()
+        st.rerun()
 
     def _render_game_card(self, game, show_markets):
         with st.container():
