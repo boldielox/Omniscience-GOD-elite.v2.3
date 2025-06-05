@@ -20,7 +20,7 @@ class Config:
         "Tennis": "tennis_atp"
     }
     SPORTSBOOKS = ["FanDuel", "DraftKings", "BetMGM", "Caesars", "PointsBet"]
-    MARKETS = ["h2h", "spreads", "totals"]
+    STANDARD_MARKETS = ["h2h", "spreads", "totals"]
     PLAYER_MARKETS = {
         "NBA": ["player_points", "player_rebounds", "player_assists", "player_threes"],
         "MLB": ["player_home_runs", "player_hits", "player_rbis", "player_strikeouts"]
@@ -36,16 +36,18 @@ class Game:
         self.home = data['home_team']
         self.away = data['away_team']
         self.start_time = self._parse_time(data['commence_time'])
-        self.odds = self._parse_odds(data['bookmakers'])
-        self.player_props = self._parse_player_props(data['bookmakers'], sport_name)
+        self.bookmakers = data.get('bookmakers', [])
+        self.sport_name = sport_name
+        self.odds = self._parse_standard_odds()
+        self.player_props = []  # Will be filled later by per-event call
 
     def _parse_time(self, time_str):
         dt = datetime.fromisoformat(time_str[:-1]).astimezone(pytz.utc)
         return dt.astimezone(Config.TIMEZONE)
 
-    def _parse_odds(self, bookmakers):
+    def _parse_standard_odds(self):
         odds_data = {}
-        for book in bookmakers:
+        for book in self.bookmakers:
             if book['key'] in Config.SPORTSBOOKS:
                 odds_data[book['key']] = {
                     'moneyline': next((m for m in book['markets'] if m['key'] == 'h2h'), None),
@@ -53,26 +55,6 @@ class Game:
                     'spreads': next((m for m in book['markets'] if m['key'] == 'spreads'), None)
                 }
         return odds_data
-
-    def _parse_player_props(self, bookmakers, sport_name):
-        props = []
-        if sport_name not in Config.PLAYER_MARKETS:
-            return props
-        player_markets = Config.PLAYER_MARKETS[sport_name]
-        for book in bookmakers:
-            if book['key'] not in Config.SPORTSBOOKS:
-                continue
-            for market in book['markets']:
-                if market['key'] in player_markets:
-                    for outcome in market['outcomes']:
-                        props.append({
-                            "book": book['key'],
-                            "market": market['key'],
-                            "player": outcome.get('description', 'N/A'),
-                            "line": outcome.get('point', 'N/A'),
-                            "odds": outcome['price']
-                        })
-        return props
 
 # ======================
 # API SERVICE
@@ -98,11 +80,8 @@ class OddsAPI:
             return False
 
     @staticmethod
-    def fetch_games(sport_key, sport_name):
+    def fetch_games(sport_key, sport_name, markets):
         try:
-            markets = Config.MARKETS.copy()
-            if sport_name in Config.PLAYER_MARKETS:
-                markets += Config.PLAYER_MARKETS[sport_name]
             url = f"{Config.API_URL}/sports/{sport_key}/odds"
             params = {
                 'apiKey': Config.API_KEY,
@@ -122,6 +101,27 @@ class OddsAPI:
         except Exception as e:
             st.error(f"API Connection Failed: {str(e)}")
             return []
+
+    @staticmethod
+    def fetch_player_props(event_id, player_markets):
+        try:
+            url = f"{Config.API_URL}/events/{event_id}/odds"
+            params = {
+                'apiKey': Config.API_KEY,
+                'regions': 'us',
+                'markets': ','.join(player_markets),
+                'oddsFormat': 'american',
+                'dateFormat': 'iso'
+            }
+            response = requests.get(url, params=params)
+            if response.ok:
+                return response.json()
+            else:
+                st.error(f"Player Props API Error: {response.status_code} - {response.text}")
+                return {}
+        except Exception as e:
+            st.error(f"Player Props Connection Failed: {str(e)}")
+            return {}
 
 # ======================
 # PREDICTIVE MODEL STUBS (Replace with your model logic/API)
@@ -215,12 +215,25 @@ class OddsApp:
                 default=st.session_state.get("league_select", ["NBA", "NFL"]),
                 key="league_select"
             )
-            st.markdown("### 📊 Display Options")
+            st.markdown("### 📊 Standard Markets")
             st.multiselect(
-                "MARKETS TO SHOW",
-                Config.MARKETS,
-                default=st.session_state.get("markets_select", Config.MARKETS),
+                "Select Standard Markets",
+                Config.STANDARD_MARKETS,
+                default=st.session_state.get("markets_select", Config.STANDARD_MARKETS),
                 key="markets_select"
+            )
+            st.markdown("### 🏀⚾ Player Prop Markets")
+            st.multiselect(
+                "NBA Player Props",
+                Config.PLAYER_MARKETS["NBA"],
+                default=st.session_state.get("nba_player_markets", Config.PLAYER_MARKETS["NBA"]),
+                key="nba_player_markets"
+            )
+            st.multiselect(
+                "MLB Player Props",
+                Config.PLAYER_MARKETS["MLB"],
+                default=st.session_state.get("mlb_player_markets", Config.PLAYER_MARKETS["MLB"]),
+                key="mlb_player_markets"
             )
             if 'last_refresh' in st.session_state:
                 st.markdown(f"🔄 Last refresh: {st.session_state.last_refresh.strftime('%H:%M:%S')}")
@@ -236,10 +249,41 @@ class OddsApp:
     def _force_refresh(self):
         st.session_state.last_refresh = datetime.now()
         selected_sports = st.session_state.get("league_select", ["NBA", "NFL"])
+        standard_markets = st.session_state.get("markets_select", Config.STANDARD_MARKETS)
         for sport in selected_sports:
             sport_key = Config.SPORTS[sport]
-            st.session_state.games[sport] = OddsAPI.fetch_games(sport_key, sport)
+            games = OddsAPI.fetch_games(sport_key, sport, standard_markets)
+            # Player props per event
+            player_markets = []
+            if sport == "NBA":
+                player_markets = st.session_state.get("nba_player_markets", [])
+            elif sport == "MLB":
+                player_markets = st.session_state.get("mlb_player_markets", [])
+            for game in games:
+                if player_markets:
+                    player_props_data = OddsAPI.fetch_player_props(game.id, player_markets)
+                    game.player_props = self._parse_player_props_from_event(player_props_data)
+            st.session_state.games[sport] = games
         st.rerun()
+
+    def _parse_player_props_from_event(self, event_data):
+        props = []
+        if not event_data or 'bookmakers' not in event_data:
+            return props
+        for book in event_data['bookmakers']:
+            if book['key'] not in Config.SPORTSBOOKS:
+                continue
+            for market in book['markets']:
+                if market['key'] in sum(Config.PLAYER_MARKETS.values(), []):  # flatten all player markets
+                    for outcome in market['outcomes']:
+                        props.append({
+                            "book": book['key'],
+                            "market": market['key'],
+                            "player": outcome.get('description', 'N/A'),
+                            "line": outcome.get('point', 'N/A'),
+                            "odds": outcome['price']
+                        })
+        return props
 
     def _render_game_card(self, game, show_markets):
         with st.container():
@@ -248,17 +292,14 @@ class OddsApp:
                 <h3>{game.away} @ {game.home}</h3>
                 <p>⏰ {game.start_time.strftime('%a %m/%d %I:%M %p ET')}</p>
             """, unsafe_allow_html=True)
-            # Core analysis for this game
             model_info = get_model_analysis(game)
             if model_info:
                 st.markdown(f"**Model Prediction:** {model_info['prediction']}  \n"
                             f"**Flag:** {model_info['flag']}  \n"
                             f"**Reason:** {model_info['explanation']}")
-            # Odds tables
             for book in Config.SPORTSBOOKS:
                 if book in game.odds:
                     self._render_odds_table(book, game.odds[book], show_markets, game)
-            # Player props
             if game.player_props:
                 st.markdown("**Player Props:**")
                 for prop in game.player_props:
@@ -311,12 +352,8 @@ class OddsApp:
             st.markdown(f"**{sender}:** {message}")
 
     def _ask_omniscience(self, query):
-        """
-        Calls the Omniscience model API with the user's query and returns the model's explanation.
-        """
         try:
-            # Change the URL to your actual model endpoint
-            url = "http://localhost:8000/ask"
+            url = "http://localhost:8000/ask"  # Replace with your real model API endpoint
             payload = {"query": query}
             response = requests.post(url, json=payload, timeout=15)
             response.raise_for_status()
@@ -330,7 +367,7 @@ class OddsApp:
         st.title("📊 Live Odds Dashboard")
         st.markdown("---")
         selected_sports = st.session_state.get("league_select", ["NBA", "NFL"])
-        show_markets = st.session_state.get("markets_select", Config.MARKETS)
+        show_markets = st.session_state.get("markets_select", Config.STANDARD_MARKETS)
         for sport in selected_sports:
             st.header(f"🏟️ {sport} Games")
             if not st.session_state.games.get(sport, []):
@@ -340,9 +377,6 @@ class OddsApp:
                 self._render_game_card(game, show_markets)
         self._render_omniscience_chat()
 
-# ======================
-# APP EXECUTION
-# ======================
 if __name__ == "__main__":
     app = OddsApp()
     app.run()
