@@ -1,7 +1,9 @@
 streamlit
-numpy
-pandas
 requests
-python-dotenv
-pytz
-plotly
+pandas
+numpy
+matplotlib
+seaborn
+networkx
+sqlite3
+pyttsx3
