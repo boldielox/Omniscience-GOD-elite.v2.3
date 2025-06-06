@@ -2,5 +2,6 @@ streamlit
 numpy
 pandas
 requests
+python-dotenv
 pytz
 plotly
