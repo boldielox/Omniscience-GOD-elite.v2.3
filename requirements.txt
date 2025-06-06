@@ -7,3 +7,4 @@ seaborn
 networkx
 sqlite3
 pyttsx3
+pygments
