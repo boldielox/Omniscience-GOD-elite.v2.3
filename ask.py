@@ -1,10 +1,10 @@
 import os
 
-# Attempt to import pyttsx3 safely
+# --- Safe import of pyttsx3 for local TTS ---
 try:
     import pyttsx3
 except ImportError:
-    pyttsx3 = None  # Not available in this environment
+    pyttsx3 = None  # pyttsx3 not available in this environment
 
 
 def safe_init_tts():
@@ -25,14 +25,13 @@ def safe_init_tts():
         return None
 
 
-# Initialize the TTS engine only when appropriate
+# Initialize TTS engine if appropriate
 engine = safe_init_tts()
 
 
 def speak(text):
     """
-    Speak the given text if TTS is available.
-    Fallback to printing the message in unsupported environments.
+    Speak the given text if TTS is available, otherwise print it.
     """
     if engine:
         engine.say(text)
@@ -41,6 +40,23 @@ def speak(text):
         print(f"[TTS Disabled] {text}")
 
 
-# EXAMPLE USAGE — OPTIONAL
-if __name__ == "__main__":
-    speak("Welcome to the Omniscient App!")
+# --- Omniscient UI Entry Point ---
+import streamlit as st
+
+
+def ask_omniscience_ui():
+    """
+    Streamlit UI function for the Omniscient App.
+    Adjust logic as needed — this is a stub.
+    """
+    st.title("🔮 Ask the Omniscient")
+
+    user_question = st.text_input("Ask your question:")
+
+    if st.button("Submit") and user_question:
+        # Here you could add logic to generate a response
+        response = f"Answer to: {user_question}"
+        st.write(response)
+
+        # Optional: use TTS (only local)
+        speak(response)
