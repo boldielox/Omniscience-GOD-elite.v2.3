@@ -1,4 +1,5 @@
 # ask.py
+
 import os
 import streamlit as st
 
@@ -6,14 +7,25 @@ import streamlit as st
 try:
     import pyttsx3
 except ImportError:
-    pyttsx3 = None  # TTS unavailable
+    pyttsx3 = None  # pyttsx3 is not available
+
+
+def is_streamlit_runtime():
+    """
+    Detect if running in a Streamlit runtime environment.
+    """
+    try:
+        import streamlit.runtime
+        return True
+    except ImportError:
+        return False
 
 
 def safe_init_tts():
     """
-    Initialize the TTS engine unless running in a Streamlit environment or pyttsx3 is unavailable.
+    Initialize the TTS engine unless running in Streamlit or pyttsx3 is unavailable.
     """
-    if st._is_running_with_streamlit:
+    if is_streamlit_runtime():
         print("TTS disabled: Running in Streamlit environment.")
         return None
     if pyttsx3 is None:
@@ -26,6 +38,7 @@ def safe_init_tts():
         return None
 
 
+# Initialize TTS engine
 engine = safe_init_tts()
 
 
@@ -43,17 +56,22 @@ def speak(text):
 # --- Omniscient UI Entry Point ---
 def ask_omniscience_ui(analyzer=None, sport=None):
     """
-    Streamlit UI function for the Omniscient App "Ask" tab.
-    Optionally takes an analyzer and sport context.
+    Streamlit UI for the Omniscient 'Ask' tab.
+
+    :param analyzer: Optional model or inference engine
+    :param sport: Optional selected sport context
     """
     st.title("🔮 Ask the Omniscient")
     st.markdown("Enter a sports-related question, prediction, or hypothesis.")
 
     user_question = st.text_input("Ask your question:")
+
     if st.button("Submit") and user_question:
-        # Replace with actual model logic
-        if analyzer:
-            response = analyzer.answer(user_question, sport) if hasattr(analyzer, "answer") else f"Mocked: {user_question}"
+        if analyzer and hasattr(analyzer, "answer"):
+            try:
+                response = analyzer.answer(user_question, sport)
+            except Exception as e:
+                response = f"Error from analyzer: {e}"
         else:
             response = f"Answer to: {user_question}"
 
