@@ -1,22 +1,23 @@
+# ask.py
 import os
+import streamlit as st
 
 # --- Safe import of pyttsx3 for local TTS ---
 try:
     import pyttsx3
 except ImportError:
-    pyttsx3 = None  # pyttsx3 not available in this environment
+    pyttsx3 = None  # TTS unavailable
 
 
 def safe_init_tts():
     """
-    Initialize the TTS engine unless running on Streamlit Cloud
-    or pyttsx3 is unavailable or broken.
+    Initialize the TTS engine unless running in a Streamlit environment or pyttsx3 is unavailable.
     """
-    if "STREAMLIT_SERVER_ENABLED" in os.environ:
-        print("TTS disabled: Streamlit Cloud detected.")
+    if st._is_running_with_streamlit:
+        print("TTS disabled: Running in Streamlit environment.")
         return None
     if pyttsx3 is None:
-        print("TTS disabled: pyttsx3 is not installed.")
+        print("TTS disabled: pyttsx3 not installed.")
         return None
     try:
         return pyttsx3.init()
@@ -25,13 +26,12 @@ def safe_init_tts():
         return None
 
 
-# Initialize TTS engine if appropriate
 engine = safe_init_tts()
 
 
 def speak(text):
     """
-    Speak the given text if TTS is available, otherwise print it.
+    Speak the given text if TTS is available; otherwise print it.
     """
     if engine:
         engine.say(text)
@@ -41,22 +41,21 @@ def speak(text):
 
 
 # --- Omniscient UI Entry Point ---
-import streamlit as st
-
-
-def ask_omniscience_ui():
+def ask_omniscience_ui(analyzer=None, sport=None):
     """
-    Streamlit UI function for the Omniscient App.
-    Adjust logic as needed — this is a stub.
+    Streamlit UI function for the Omniscient App "Ask" tab.
+    Optionally takes an analyzer and sport context.
     """
     st.title("🔮 Ask the Omniscient")
+    st.markdown("Enter a sports-related question, prediction, or hypothesis.")
 
     user_question = st.text_input("Ask your question:")
-
     if st.button("Submit") and user_question:
-        # Here you could add logic to generate a response
-        response = f"Answer to: {user_question}"
-        st.write(response)
+        # Replace with actual model logic
+        if analyzer:
+            response = analyzer.answer(user_question, sport) if hasattr(analyzer, "answer") else f"Mocked: {user_question}"
+        else:
+            response = f"Answer to: {user_question}"
 
-        # Optional: use TTS (only local)
+        st.success(response)
         speak(response)
