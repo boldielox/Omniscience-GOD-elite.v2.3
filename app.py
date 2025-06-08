@@ -1,5 +1,5 @@
 import streamlit as st
-from utils.api import fetch_odds_data, fetch_player_stats
+from utils.api import fetch_nba_games, fetch_player_stats
 from utils.models import PlayerProjection, BettingAnalyzer
 from utils.visuals import set_background, render_matchup_card
 from ask import ask_omniscience_ui
@@ -7,9 +7,8 @@ from analytics.tracker import prediction_dashboard, outcome_entry_form
 from analytics.autoeval import evaluate_uploaded_results, summarize_accuracy
 import pandas as pd
 import logging
-from dotenv import load_dotenv
-import os
 import traceback
+from datetime import datetime, timedelta
 
 # Configure logging
 logging.basicConfig(
@@ -18,22 +17,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Load environment variables
-load_dotenv()
-
 # Configure Streamlit page
 st.set_page_config(
-    page_title="Omniscience Sports",
-    page_icon="🔮",
+    page_title="NBA Omniscience",
+    page_icon="🏀",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
 # Initialize session state
-if 'previous_sport' not in st.session_state:
-    st.session_state.previous_sport = None
-if 'previous_market' not in st.session_state:
-    st.session_state.previous_market = None
+if 'previous_date' not in st.session_state:
+    st.session_state.previous_date = None
 if 'current_data' not in st.session_state:
     st.session_state.current_data = None
 
@@ -42,46 +36,34 @@ try:
 except Exception as e:
     logger.error(f"Error setting background: {str(e)}")
 
-# Get API key from environment or secrets
-SPORTSGAME_API = os.getenv('SPORTSGAME_API', st.secrets.get("SPORTSGAME_API"))
-if not SPORTSGAME_API:
-    st.error("API key not found. Please set SPORTSGAME_API in environment or secrets.")
-    st.stop()
-
 # Sidebar setup
 st.sidebar.image("eye_background.jpg", use_column_width=True)
-st.sidebar.title("Omniscience: Divine Sports Intelligence")
+st.sidebar.title("NBA Omniscience: Divine Basketball Intelligence")
 
-selected_tab = st.sidebar.radio("Navigate", ["Dashboard", "Ask", "Tracking"])
-selected_sport = st.sidebar.selectbox("Choose Sport", [
-    "nba", "nfl", "mlb", "nhl", "soccer", "ncaab", 
-    "ncaaf", "wnba", "college_baseball"
-])
-market = st.sidebar.selectbox("Market", [
-    "h2h", "spreads", "totals",
-    "player_points", "player_assists", "player_rebounds", "player_blocks",
-    "player_steals", "player_touchdowns", "player_passing_yards",
-    "player_rushing_yards", "player_hits", "player_home_runs",
-    "player_rbis", "player_runs", "player_total_bases", "player_strikeouts",
-    "player_walks", "player_singles", "player_doubles", "player_triples"
-])
+selected_tab = st.sidebar.radio("Navigate", ["Games", "Players", "Analysis"])
+
+# Date selector for games
+today = datetime.now()
+selected_date = st.sidebar.date_input(
+    "Select Date",
+    value=today,
+    min_value=today - timedelta(days=365),
+    max_value=today + timedelta(days=7)
+)
+
 refresh = st.sidebar.button("⚡ Refresh")
 
 # Main content
-if selected_tab == "Dashboard":
-    st.title(f"Omniscient Matchups - {selected_sport.upper()} [{market}]")
+if selected_tab == "Games":
+    st.title(f"NBA Games - {selected_date.strftime('%B %d, %Y')}")
     
     try:
         # Only fetch new data if necessary
-        if (st.session_state.previous_sport != selected_sport or 
-            st.session_state.previous_market != market or 
-            refresh):
+        if (st.session_state.previous_date != selected_date or refresh):
+            logger.info(f"Fetching new data for {selected_date}")
+            data = fetch_nba_games(selected_date)
             
-            logger.info(f"Fetching new data for {selected_sport} - {market}")
-            data = fetch_odds_data(selected_sport, market, SPORTSGAME_API)
-            
-            st.session_state.previous_sport = selected_sport
-            st.session_state.previous_market = market
+            st.session_state.previous_date = selected_date
             st.session_state.current_data = data
         else:
             data = st.session_state.current_data
@@ -90,45 +72,80 @@ if selected_tab == "Dashboard":
             for game in data:
                 try:
                     render_matchup_card(game)
-                    if st.button(f"🧠 Analyze {game['home_team']} vs {game['away_team']}", 
+                    if st.button(f"🏀 Analyze {game['home_team']['full_name']} vs {game['visitor_team']['full_name']}", 
                                key=game['id']):
                         with st.spinner("Analyzing matchup..."):
-                            stats = fetch_player_stats(game, SPORTSGAME_API)
-                            projections = [PlayerProjection(p) for p in stats]
-                            analyzer = BettingAnalyzer(projections)
-                            analyzer.analyze_odds(game['markets'])
-
-                            st.subheader("📊 Divine Value Plays")
-                            df = pd.DataFrame(analyzer.value_plays)
-                            st.dataframe(df)
+                            # Fetch detailed stats for both teams
+                            home_stats = fetch_player_stats(game['home_team']['id'])
+                            away_stats = fetch_player_stats(game['visitor_team']['id'])
                             
-                            st.subheader("♾️ Arbitrage Opportunities")
-                            st.dataframe(pd.DataFrame(analyzer.arb_opportunities))
+                            # Combine and analyze
+                            all_stats = home_stats + away_stats
+                            projections = [PlayerProjection(p) for p in all_stats]
+                            analyzer = BettingAnalyzer(projections)
+                            
+                            # Display team analysis
+                            st.subheader("📊 Team Analysis")
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                st.write(f"**{game['home_team']['full_name']}**")
+                                home_df = pd.DataFrame(home_stats)
+                                if not home_df.empty:
+                                    st.dataframe(home_df[['player_name', 'pts', 'reb', 'ast', 'stl', 'blk']])
+                            
+                            with col2:
+                                st.write(f"**{game['visitor_team']['full_name']}**")
+                                away_df = pd.DataFrame(away_stats)
+                                if not away_df.empty:
+                                    st.dataframe(away_df[['player_name', 'pts', 'reb', 'ast', 'stl', 'blk']])
+                            
+                            # Display key matchups
+                            st.subheader("🔥 Key Matchups")
+                            matchups_df = analyzer.get_key_matchups()
+                            st.dataframe(matchups_df)
+                            
                 except Exception as e:
                     logger.error(f"Error processing game: {str(e)}")
                     st.error(f"Error processing game data")
         else:
-            st.warning("No matchups available for the selected criteria.")
+            st.warning("No games available for the selected date.")
             
     except Exception as e:
         logger.error(f"Dashboard error: {str(e)}")
         logger.error(traceback.format_exc())
-        st.error("An error occurred while loading the dashboard")
+        st.error("An error occurred while loading the games")
 
-elif selected_tab == "Ask":
-    try:
-        analyzer = BettingAnalyzer([])
-        ask_omniscience_ui(analyzer, selected_sport)
-    except Exception as e:
-        logger.error(f"Ask tab error: {str(e)}")
-        st.error("An error occurred in the Ask section")
+elif selected_tab == "Players":
+    st.title("NBA Player Analysis")
+    
+    # Player search
+    player_name = st.text_input("Search Player")
+    if player_name:
+        try:
+            player_stats = fetch_player_stats(player_name=player_name)
+            if player_stats:
+                st.subheader(f"📊 {player_name}'s Statistics")
+                stats_df = pd.DataFrame(player_stats)
+                st.dataframe(stats_df)
+                
+                # Show player trends
+                st.subheader("📈 Performance Trends")
+                fig = analyzer.plot_player_trends(stats_df)
+                st.plotly_chart(fig)
+            else:
+                st.warning("No player data found.")
+        except Exception as e:
+            logger.error(f"Player analysis error: {str(e)}")
+            st.error("An error occurred while analyzing player data")
 
-elif selected_tab == "Tracking":
+elif selected_tab == "Analysis":
     try:
+        st.title("NBA Performance Tracking")
         prediction_dashboard()
         outcome_entry_form()
         
-        st.subheader("📤 Upload Outcomes")
+        st.subheader("📤 Upload Game Results")
         uploaded = st.file_uploader("Upload results CSV", type=["csv"])
         
         if uploaded:
@@ -137,10 +154,10 @@ elif selected_tab == "Tracking":
                 if inserted:
                     st.success(msg)
                     df, acc = summarize_accuracy()
-                    st.metric("Model Accuracy", f"{acc*100:.2f}%")
+                    st.metric("Prediction Accuracy", f"{acc*100:.2f}%")
                     st.dataframe(df.head(20))
                 else:
                     st.error(msg)
     except Exception as e:
-        logger.error(f"Tracking tab error: {str(e)}")
-        st.error("An error occurred in the Tracking section")
+        logger.error(f"Analysis tab error: {str(e)}")
+        st.error("An error occurred in the Analysis section")
