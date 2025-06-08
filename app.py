@@ -7,8 +7,8 @@ from analytics.tracker import prediction_dashboard, outcome_entry_form
 from analytics.autoeval import evaluate_uploaded_results, summarize_accuracy
 import pandas as pd
 import logging
-import traceback
 from datetime import datetime, timedelta
+import os
 
 # Configure logging
 logging.basicConfig(
@@ -31,14 +31,9 @@ if 'previous_date' not in st.session_state:
 if 'current_data' not in st.session_state:
     st.session_state.current_data = None
 
-try:
-    set_background("eye_background2.jpg")
-except Exception as e:
-    logger.error(f"Error setting background: {str(e)}")
-
-# Sidebar setup
-st.sidebar.image("eye_background.jpg", use_column_width=True)
+# Sidebar setup without background image
 st.sidebar.title("NBA Omniscience: Divine Basketball Intelligence")
+st.sidebar.markdown("---")
 
 selected_tab = st.sidebar.radio("Navigate", ["Games", "Players", "Analysis"])
 
@@ -92,72 +87,10 @@ if selected_tab == "Games":
                                 st.write(f"**{game['home_team']['full_name']}**")
                                 home_df = pd.DataFrame(home_stats)
                                 if not home_df.empty:
-                                    st.dataframe(home_df[['player_name', 'pts', 'reb', 'ast', 'stl', 'blk']])
+                                    st.dataframe(home_df[['player_name', 'pts', 'reb', 'ast', 'stl', 'blk']], 
+                                               use_container_width=True)
                             
                             with col2:
                                 st.write(f"**{game['visitor_team']['full_name']}**")
                                 away_df = pd.DataFrame(away_stats)
                                 if not away_df.empty:
-                                    st.dataframe(away_df[['player_name', 'pts', 'reb', 'ast', 'stl', 'blk']])
-                            
-                            # Display key matchups
-                            st.subheader("🔥 Key Matchups")
-                            matchups_df = analyzer.get_key_matchups()
-                            st.dataframe(matchups_df)
-                            
-                except Exception as e:
-                    logger.error(f"Error processing game: {str(e)}")
-                    st.error(f"Error processing game data")
-        else:
-            st.warning("No games available for the selected date.")
-            
-    except Exception as e:
-        logger.error(f"Dashboard error: {str(e)}")
-        logger.error(traceback.format_exc())
-        st.error("An error occurred while loading the games")
-
-elif selected_tab == "Players":
-    st.title("NBA Player Analysis")
-    
-    # Player search
-    player_name = st.text_input("Search Player")
-    if player_name:
-        try:
-            player_stats = fetch_player_stats(player_name=player_name)
-            if player_stats:
-                st.subheader(f"📊 {player_name}'s Statistics")
-                stats_df = pd.DataFrame(player_stats)
-                st.dataframe(stats_df)
-                
-                # Show player trends
-                st.subheader("📈 Performance Trends")
-                fig = analyzer.plot_player_trends(stats_df)
-                st.plotly_chart(fig)
-            else:
-                st.warning("No player data found.")
-        except Exception as e:
-            logger.error(f"Player analysis error: {str(e)}")
-            st.error("An error occurred while analyzing player data")
-
-elif selected_tab == "Analysis":
-    try:
-        st.title("NBA Performance Tracking")
-        prediction_dashboard()
-        outcome_entry_form()
-        
-        st.subheader("📤 Upload Game Results")
-        uploaded = st.file_uploader("Upload results CSV", type=["csv"])
-        
-        if uploaded:
-            with st.spinner("Processing results..."):
-                inserted, msg = evaluate_uploaded_results(uploaded)
-                if inserted:
-                    st.success(msg)
-                    df, acc = summarize_accuracy()
-                    st.metric("Prediction Accuracy", f"{acc*100:.2f}%")
-                    st.dataframe(df.head(20))
-                else:
-                    st.error(msg)
-    except Exception as e:
-        logger.error(f"Analysis tab error: {str(e)}")
-        st.error("An error occurred in the Analysis section")
