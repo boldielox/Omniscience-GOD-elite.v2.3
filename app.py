@@ -1,7 +1,7 @@
 import streamlit as st
-from utils.data_manager import DataManager, BettingAnalyzer
 from utils.api import fetch_nba_games, fetch_player_stats
-from utils.visuals import render_matchup_card, create_trend_chart
+from utils.data_manager import DataManager
+from utils.visuals import render_matchup_card
 from datetime import datetime, timedelta
 import logging
 
@@ -9,16 +9,18 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Initialize data manager and analyzer
-data_manager = DataManager()
-analyzer = BettingAnalyzer()
-
-# Streamlit page config
+# Initialize
 st.set_page_config(page_title="NBA Predictions", layout="wide")
+data_manager = DataManager()
 
 # Sidebar
 st.sidebar.title("NBA Predictions")
-selected_date = st.sidebar.date_input("Select Date", datetime.now())
+selected_date = st.sidebar.date_input(
+    "Select Date",
+    datetime.now(),
+    min_value=datetime.now() - timedelta(days=7),
+    max_value=datetime.now() + timedelta(days=7)
+)
 
 # Main content
 st.title(f"NBA Games - {selected_date.strftime('%B %d, %Y')}")
@@ -32,37 +34,30 @@ if games:
         
         if st.button(f"🏀 Analyze", key=f"analyze_{game['id']}"):
             with st.spinner("Analyzing..."):
-                # Get prediction
-                prediction = analyzer.analyze_game(
-                    game['home_team']['full_name'],
+                # Get team histories
+                home_history = data_manager.get_team_history(
+                    game['home_team']['full_name']
+                )
+                away_history = data_manager.get_team_history(
                     game['visitor_team']['full_name']
                 )
                 
-                # Display prediction
-                st.subheader("Game Prediction")
-                col1, col2 = st.columns(2)
+                # Display analysis
+                st.subheader("Team Analysis")
                 
+                col1, col2 = st.columns(2)
                 with col1:
-                    st.metric(
-                        "Predicted Home Score",
-                        prediction['predicted_home_score']
-                    )
+                    st.write(f"**{game['home_team']['full_name']}**")
+                    if not home_history.empty:
+                        st.dataframe(home_history)
+                    else:
+                        st.write("No historical data available")
                 
                 with col2:
-                    st.metric(
-                        "Predicted Away Score",
-                        prediction['predicted_away_score']
-                    )
-                
-                # Display betting analysis
-                st.subheader("Betting Analysis")
-                st.write(f"**Spread:** {prediction['spread']} points")
-                st.write(f"**Total:** {prediction['total']} points")
-                st.write(f"**Confidence:** {prediction['confidence']}")
-                
-                # Display trends
-                st.subheader("Trends")
-                for trend in prediction['trends']:
-                    st.write(f"• {trend}")
+                    st.write(f"**{game['visitor_team']['full_name']}**")
+                    if not away_history.empty:
+                        st.dataframe(away_history)
+                    else:
+                        st.write("No historical data available")
 else:
     st.info("No games found for selected date.")
