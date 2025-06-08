@@ -8,7 +8,7 @@ from analytics.tracker import prediction_dashboard, outcome_entry_form
 from analytics.autoeval import evaluate_uploaded_results, summarize_accuracy
 
 # Secure API key
-SPORTGAME_API_KEY = st.secrets["SPORTGAME_API_KEY"]
+SPORSTGAME_API_KEY = st.secrets["SPORTSGAME_API_KEY"]
 
 # Sidebar
 st.sidebar.image("eye_background.jpg", use_column_width=True)
