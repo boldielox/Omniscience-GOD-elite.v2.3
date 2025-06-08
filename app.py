@@ -1,5 +1,3 @@
-# app.py
-
 import streamlit as st
 import pandas as pd
 from utils.api import fetch_odds_data, fetch_player_stats
@@ -9,7 +7,6 @@ from ask import ask_omniscience_ui
 from analytics.tracker import prediction_dashboard, outcome_entry_form
 from analytics.autoeval import evaluate_uploaded_results, summarize_accuracy
 
-
 # Secure API key
 SPORTGAMEODDS_API_KEY = st.secrets["SPORTGAMEODDS_API_KEY"]
 
@@ -18,23 +15,27 @@ st.sidebar.image("eye_background.jpg", use_column_width=True)
 st.sidebar.title("Omniscience: Divine Sports Intelligence")
 
 selected_tab = st.sidebar.radio("Navigate", ["Dashboard", "Ask", "Tracking"])
-selected_sport = st.sidebar.selectbox("Choose Sport", [
-    "nba", "nfl", "mlb", "nhl", "soccer", "ncaab", "ncaaf", "wnba", "college_baseball"
-])
-market = st.sidebar.selectbox("Market", [
-    "h2h", "spreads", "totals",
-    "player_points", "player_assists", "player_rebounds", "player_blocks",
-    "player_steals", "player_touchdowns", "player_passing_yards",
-    "player_rushing_yards", "player_hits", "player_home_runs",
-    "player_rbis", "player_runs", "player_total_bases", "player_strikeouts",
-    "player_walks", "player_singles", "player_doubles", "player_triples"
-])
+selected_sport = st.sidebar.selectbox(
+    "Choose Sport",
+    [
+        "nba", "nfl", "mlb", "nhl", "soccer", "ncaab", "ncaaf", "wnba", "college_baseball"
+    ]
+)
+market = st.sidebar.selectbox(
+    "Market",
+    [
+        "h2h", "spreads", "totals", "player_points", "player_assists", "player_rebounds",
+        "player_blocks", "player_steals", "player_touchdowns", "player_passing_yards",
+        "player_rushing_yards", "player_hits", "player_home_runs", "player_rbis",
+        "player_runs", "player_total_bases", "player_strikeouts", "player_walks",
+        "player_singles", "player_doubles", "player_triples"
+    ]
+)
 refresh = st.sidebar.button("⚡ Refresh")
 
 # === DASHBOARD ===
 if selected_tab == "Dashboard":
     st.title(f"Omniscient Matchups - {selected_sport.upper()} [{market}]")
-
     try:
         data = fetch_odds_data(selected_sport, market, SPORTGAMEODDS_API_KEY)
     except Exception as e:
