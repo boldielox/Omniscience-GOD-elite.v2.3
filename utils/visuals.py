@@ -1,23 +1,35 @@
 import streamlit as st
-import base64
+import plotly.graph_objects as go
+from typing import Dict
 
-def set_background(image_file_path: str):
-    with open(image_file_path, "rb") as image_file:
-        encoded = base64.b64encode(image_file.read()).decode()
-    st.markdown(f"""
-    <style>
-        .stApp {{
-            background-image: url("data:image/jpg;base64,{encoded}");
-            background-size: cover;
-            background-attachment: fixed;
-        }}
-    </style>
-    """, unsafe_allow_html=True)
+def render_matchup_card(game: Dict):
+    """Render a game matchup card"""
+    col1, col2, col3 = st.columns([2,1,2])
+    
+    with col1:
+        st.write(f"**{game['home_team']['full_name']}**")
+    
+    with col2:
+        st.write("VS")
+        
+    with col3:
+        st.write(f"**{game['visitor_team']['full_name']}**")
 
-def render_matchup_card(game: dict):
-    st.markdown(f"""
-        <div style='background-color:#1e1e1e;padding:10px;margin-bottom:10px;border-radius:8px'>
-            <h4 style='color:gold'>{game['away_team']} @ {game['home_team']}</h4>
-            <p style='color:white'>Start: {game['commence_time']}</p>
-        </div>
-    """, unsafe_allow_html=True)
+def create_trend_chart(data, title="Performance Trend"):
+    """Create a trend chart using plotly"""
+    fig = go.Figure()
+    
+    fig.add_trace(go.Scatter(
+        x=data.index,
+        y=data.values,
+        mode='lines+markers'
+    ))
+    
+    fig.update_layout(
+        title=title,
+        xaxis_title="Games",
+        yaxis_title="Points",
+        showlegend=False
+    )
+    
+    return fig
