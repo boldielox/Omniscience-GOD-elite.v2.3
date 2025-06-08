@@ -7,3 +7,4 @@ seaborn
 networkx
 pyttsx3
 pygments
+python-dotenv
