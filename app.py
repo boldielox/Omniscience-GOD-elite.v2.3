@@ -9,8 +9,6 @@ from ask import ask_omniscience_ui
 from analytics.tracker import prediction_dashboard, outcome_entry_form
 from analytics.autoeval import evaluate_uploaded_results, summarize_accuracy
 
-# Background image
-set_background("eye_background2.jpg")
 
 # Secure API key
 SPORTGAMEODDS_API_KEY = st.secrets["SPORTGAMEODDS_API_KEY"]
